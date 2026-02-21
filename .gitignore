@@ -1,4 +1,6 @@
 Packages/
+ServerPackages/*
+!ServerPackages/.gitkeep
 *.rbxl
 *.rbxlx
 *.rbxm

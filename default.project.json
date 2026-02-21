@@ -1,5 +1,6 @@
 {
   "name": "Zipshot",
+  "globIgnorePaths": ["**/.gitkeep"],
   "tree": {
     "$className": "DataModel",
     "ReplicatedStorage": {
@@ -10,17 +11,28 @@
         "$path": "Packages"
       }
     },
+    "ServerStorage": {
+      "$className": "ServerStorage",
+      "$ignoreUnknownInstances": true,
+      "ServerPackages": {
+        "$path": "ServerPackages"
+      }
+    },
     "ServerScriptService": {
       "$className": "ServerScriptService",
       "$ignoreUnknownInstances": true,
-      "$path": "src/server"
+      "Server": {
+        "$path": "src/server"
+      }
     },
     "StarterPlayer": {
       "$className": "StarterPlayer",
       "StarterPlayerScripts": {
         "$className": "StarterPlayerScripts",
         "$ignoreUnknownInstances": true,
-        "$path": "src/client"
+        "Client": {
+          "$path": "src/client"
+        }
       },
       "$ignoreUnknownInstances": true
     }
