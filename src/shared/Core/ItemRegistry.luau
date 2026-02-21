@@ -1,2 +1,37 @@
--- Item registry for Zipshot
-return {}
+local Rarity = require(script.Parent.util.Types.Rarity)
+local ShopTypes = require(script.Parent.util.Types.ShopTypes)
+
+type ShopItem = ShopTypes.ShopItem
+
+local Weapons: { [string]: ShopItem } = {
+    -- Be adding weapons name here
+}
+
+
+local Skins: { [string]: ShopItem } = {
+    -- Be adding Skin Names
+}
+
+
+local function getItem(id: string): ShopItem?
+    return Weapons[id] or Skins[id]
+end
+
+local function getCatalog(): { ShoptItem }
+    local catalog = {}
+    for _, item in Weapons do
+        table.insert(catalog, item)
+    end
+    for _, item in Skins do
+        table.insert(catalog, item)
+    end
+    return catalog
+end
+
+return {
+    Weapons = Weapons,
+    Skins = Skins,
+    getItem = getItem,
+    getCatalog = getCatalog,
+}
+
