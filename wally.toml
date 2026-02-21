@@ -7,4 +7,5 @@ realm = "shared"
 [dependencies]
 Knit = "sleitnick/knit@^1.7"
 React = "jsdotlua/react-roblox@^17.0.2"
+Maid = "devsparkle/maid@^1.0.0"
 Promise = "evaera/promise@^4.0.0"

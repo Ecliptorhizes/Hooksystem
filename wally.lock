@@ -3,6 +3,11 @@
 registry = "test"
 
 [[package]]
+name = "devsparkle/maid"
+version = "1.1.0"
+dependencies = []
+
+[[package]]
 name = "evaera/promise"
 version = "4.0.0"
 dependencies = []
@@ -115,4 +120,4 @@ dependencies = []
 [[package]]
 name = "username/zipshot"
 version = "0.1.0"
-dependencies = [["Knit", "sleitnick/knit@1.7.0"], ["Promise", "evaera/promise@4.0.0"], ["React", "jsdotlua/react-roblox@17.2.1"]]
+dependencies = [["Knit", "sleitnick/knit@1.7.0"], ["Maid", "devsparkle/maid@1.1.0"], ["Promise", "evaera/promise@4.0.0"], ["React", "jsdotlua/react-roblox@17.2.1"]]
