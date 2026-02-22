@@ -1,4 +1,3 @@
-local Rarity = require(script.Parent.util.Types.Rarity)
 local ShopTypes = require(script.Parent.util.Types.ShopTypes)
 
 type ShopItem = ShopTypes.ShopItem
