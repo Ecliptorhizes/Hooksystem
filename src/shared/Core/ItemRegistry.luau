@@ -4,7 +4,27 @@ local ShopTypes = require(script.Parent.util.Types.ShopTypes)
 type ShopItem = ShopTypes.ShopItem
 
 local Weapons: { [string]: ShopItem } = {
-    -- Be adding weapons name here
+    BasicSniper = {
+        id = "BasicSniper",
+        name = "Basic Sniper",
+        itemType = "weapon",
+        rarity = "Common",
+        price = 500,
+    },
+    HyperwaveSniper = {
+        id = "HyperwaveSniper",
+        name = "Hyperwave Sniper",
+        itemType = "weapon",
+        rarity = "Rare",
+        price = 2500,
+    },
+    MoltenSniper = {
+        id = "MoltenSniper",
+        name = "Molten Sniper",
+        itemType = "weapon",
+        rarity = "Legendary",
+        price = 10000,
+    },
 }
 
 
@@ -17,7 +37,7 @@ local function getItem(id: string): ShopItem?
     return Weapons[id] or Skins[id]
 end
 
-local function getCatalog(): { ShoptItem }
+local function getCatalog(): { ShopItem }
     local catalog = {}
     for _, item in Weapons do
         table.insert(catalog, item)

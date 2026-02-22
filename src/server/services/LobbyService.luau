@@ -3,7 +3,7 @@ local Players = game:GetService("Players")
 local Knit = require(...) -- Later get it from ReplicatedStorage
 local PlayerDataService = Knit.GetService("PlayerDataService")
 
-local LOBBY_SPAWN_CFRAME = CFRAME.new(0, 10, 0) -- will later adjust it at the right location
+local LOBBY_SPAWN_CFRAME = CFrame.new(0, 10, 0) -- will later adjust it at the right location
 
 local LobbyService = Knit.CreateService({
     Name = "LobbyService",
