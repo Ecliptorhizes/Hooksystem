@@ -1,1 +1,8 @@
--- be adding this later on 
+export type MapInfo = {
+    id: string,
+    name: string,
+    difficulty: string,
+    spawnPoints: { CFrame },
+}
+
+return {}

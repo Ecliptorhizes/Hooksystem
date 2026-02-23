@@ -31,6 +31,15 @@ local Skins: { [string]: ShopItem } = {
     -- Be adding Skin Names
 }
 
+local Melee: { [string]: ShopItem } = {
+    DefaultKnife = {
+        id = "DefaultKnife",
+        name = "Default Knife",
+        itemType = "weapon",
+        rarity = "Common",
+        price = 0,
+    },
+}
 
 local function getItem(id: string): ShopItem?
     return Weapons[id] or Skins[id]

@@ -7,6 +7,11 @@ local Maps: { [string]: MapInfo } = {
         id = "DevMap",
         name = "Dev Map",
         difficulty = "Normal",
+        spawnPoints = {
+            CFrame.new(0, 5, 0),
+            CFrame.new(20, 5, 20),
+            CFrame.new(-20, 5, -20),
+        }
     },
     RatioIsland = {
         id = "RatioIsland",
