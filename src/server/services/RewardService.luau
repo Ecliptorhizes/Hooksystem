@@ -2,11 +2,16 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
-local PlayerDataService = Knit.GetService("PlayerDataService")
 
 local RewardService = Knit.CreateService({
     Name = "RewardService",
 })
+
+local PlayerDataService
+
+function RewardService:KnitStart()
+    PlayerDataService = Knit.GetService("PlayerDataService")
+end
 
 local REWARD_CRITERIA = {
     { headshots = 5, weaponUnlock = "BasicSniper" },

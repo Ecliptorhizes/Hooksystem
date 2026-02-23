@@ -3,7 +3,7 @@ local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
-local Maid = require(ReplicatedStorage.Packages.Maid)
+local Maid = require(ReplicatedStorage.Maid)
 
 local WeaponController = Knit.CreateController({
     Name = "WeaponController",
@@ -13,14 +13,14 @@ local maid = Maid.new()
 local currentSlot: "melee" | "sniper" = "sniper"
 
 function WeaponController:KnitInit()
-    self.WeaponController = Knit.GetService("WeaponService")
+    self.WeaponService = Knit.GetService("WeaponService")
 end
 
 function WeaponController:KnitStart()
     local player = Players.LocalPlayer
     local camera = workspace.CurrentCamera
 
-    maid:GiveTask(UserInputService.InputBegan:Connect(function(input, gameProcesseed)
+    maid:GiveTask(UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
 
         if input.UserInputType == Enum.UserInputType.MouseButton1 then 
@@ -29,10 +29,12 @@ function WeaponController:KnitStart()
             else
                 self:SlashMelee()
             end
-        elseif input.UserInputType == Enum.UserInputType.MouseWheelForward then 
-            currentSlot = "sniper"
-        elseif input.UserInputType == Enum.UserInputType.MouseWheelBackward then 
-            currentSlot = "melee"
+        elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+            if input.Position.Z > 0 then
+                currentSlot = "sniper"
+            else
+                currentSlot = "melee"
+            end
         end
     end))
 end
@@ -54,7 +56,7 @@ function WeaponController:FireSniper()
 end
 
 function WeaponController:SlashMelee()
-    -- I will be adding in melee logic here
+
 end
 
 function WeaponController:KnitDestroy()

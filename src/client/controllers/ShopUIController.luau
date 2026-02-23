@@ -1,10 +1,8 @@
--- This is only a precoded script, NOTHING ELSE @Ecliptorhize :)
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
-local Maid = require(ReplicatedStorage.Packages.Maid)
+local Maid = require(ReplicatedStorage.Maid)
 
 local ShopUIController = Knit.CreateController({
     Name = "ShopUIController",

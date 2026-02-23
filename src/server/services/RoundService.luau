@@ -3,9 +3,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local MapRegistry = require(ReplicatedStorage.Core.MapRegistry)
-local MapService = Knit.GetService("MapService")
+local LobbyConfig = require(ReplicatedStorage.Core.Config.LobbyConfig)
 
-local LOBBY_SPAWN_CFRAME = CFrame.new(0, 10, 0)
+local MapService
+local SpawnService
+
+local LOBBY_SPAWN_CFRAME = LobbyConfig.LOBBY_SPAWN_CFRAME
 local LOBBY_COUNTDOWN_SEC = 30
 local ROUND_DURATION_SEC = 600
 local VOTE_DURATION_SEC = 15
@@ -62,6 +65,7 @@ local function buildRoundEndData()
 end 
 
 local function teleportAllToLobby()
+    SpawnService:ClearAllFromRound()
     for _, player in Players:GetPlayers() do 
         if player.Character then
             local hrp = player.Character:FindFirstChild("HumanoidRootPart")
@@ -122,10 +126,14 @@ end
 function RoundService:RecordDeath(player: Player)
     local s = playerStats[player.UserId]
     if s and not s.hadDied then 
-        s.hasDied = true 
+        s.hadDied = true 
         s.bestTimeSeconds = math.floor(os.clock() - (s.roundStartTime or roundStartTime))
     end 
 end 
+
+function RoundService:GetRoundState()
+    return roundState
+end
 
 function RoundService.Client:GetRoundState(_player: Player)
     return roundState 
@@ -136,6 +144,9 @@ function RoundService.Client:GetRoundEndData(_player: Player)
 end 
 
 function RoundService:KnitStart()
+    MapService = Knit.GetService("MapService")
+    SpawnService = Knit.GetService("SpawnService")
+
     Players.PlayerAdded:Connect(function(player)
         player.CharacterAdded:Connect(function(character)
             local humanoid = character:WaitForChild("Humanoid")

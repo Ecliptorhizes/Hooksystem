@@ -28,7 +28,7 @@ local Weapons: { [string]: ShopItem } = {
 
 
 local Skins: { [string]: ShopItem } = {
-    -- Be adding Skin Names
+
 }
 
 local Melee: { [string]: ShopItem } = {

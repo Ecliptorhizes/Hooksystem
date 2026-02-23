@@ -1,13 +1,18 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
-local ItemRegistry = require(ReplicatedStorage.Shared.Core.ItemRegistry)
-local PlayerDataService = Knit.GetService("PlayerDataService")
+local ItemRegistry = require(ReplicatedStorage.Core.ItemRegistry)
 
 local ShopService = Knit.CreateService({
     Name = "ShopService",
     Client = {},
 })
+
+local PlayerDataService
+
+function ShopService:KnitStart()
+    PlayerDataService = Knit.GetService("PlayerDataService")
+end
 
 function ShopService.Client:GetShopCatalog(player: Player)
     return ItemRegistry.getCatalog()

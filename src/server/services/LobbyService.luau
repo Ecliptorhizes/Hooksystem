@@ -1,36 +1,47 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Knit = require(...) -- Later get it from ReplicatedStorage
-local PlayerDataService = Knit.GetService("PlayerDataService")
+local Knit = require(ReplicatedStorage.Packages.Knit)
+local LobbyConfig = require(ReplicatedStorage.Core.Config.LobbyConfig)
 
-local LOBBY_SPAWN_CFRAME = CFrame.new(0, 10, 0) -- will later adjust it at the right location
+local LOBBY_SPAWN_CFRAME = LobbyConfig.LOBBY_SPAWN_CFRAME
 
 local LobbyService = Knit.CreateService({
     Name = "LobbyService",
 })
 
-function LobbyService:KnitStart()
-    Players.PlayerAdded:Connect(function(player)
-        PlayerDataService:LoadProfile(player)
-        player.CharacterAdded:Connect(function(character)
-            local hrp = character:WaitForChild("HumanoidRootPart")
-            if hrp then
-                hrp.CFrame = LOBBY_SPAWN_CFRAME
-            end
-        end)
+local function teleportToLobby(character)
+    local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 2)
+    if hrp then
+        hrp.CFrame = LOBBY_SPAWN_CFRAME
+    end
+end
 
-        if player.Character then 
-            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-            if hrp then 
-                hrp.CFrame = LOBBY_SPAWN_CFRAME
-            end
+function LobbyService:KnitInit()
+
+    Players.PlayerAdded:Connect(function(player)
+        player.CharacterAdded:Connect(function(character)
+            teleportToLobby(character)
+        end)
+        if player.Character then
+            teleportToLobby(player.Character)
         end
     end)
-    for _, player in Players:GetPlayers() do 
-        task.defer(function()
-            PlayerDataService:LoadProfile(player)
-        end)
+end
+
+function LobbyService:KnitStart()
+    local PlayerDataService = Knit.GetService("PlayerDataService")
+
+    for _, player in Players:GetPlayers() do
+        PlayerDataService:LoadProfile(player)
+        if player.Character then
+            teleportToLobby(player.Character)
+        end
     end
+
+    Players.PlayerAdded:Connect(function(player)
+        PlayerDataService:LoadProfile(player)
+    end)
 end
 
 return LobbyService

@@ -3,7 +3,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
-local Maid = require(ReplicatedStorage.Packages.Maid)
+local Maid = require(ReplicatedStorage.Maid)
 
 local MovementController = Knit.CreateController({
     Name = "MovementController",

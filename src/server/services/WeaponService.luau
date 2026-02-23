@@ -4,8 +4,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local ItemRegistry = require(ReplicatedStorage.Core.ItemRegistry)
-local PlayerDataService = Knit.GetService("PlayerDataService")
-local RoundService = Knit.GetService("RoundService")
+
+local PlayerDataService
+local RoundService
 
 local RAYCAST_DISTANCE = 1000
 
@@ -17,6 +18,11 @@ local WeaponService = Knit.CreateService({
     },
 
 })
+
+function WeaponService:KnitStart()
+    PlayerDataService = Knit.GetService("PlayerDataService")
+    RoundService = Knit.GetService("RoundService")
+end
 
 function WeaponService.Client:FireSniper(player: Player, origin: Vector3, direction: Vector3): (boolean, string?)
     local equipped = self.Server:GetEquippedSniper(player)
@@ -34,7 +40,7 @@ function WeaponService.Client:FireSniper(player: Player, origin: Vector3, direct
 
     local result = Workspace:Raycast(origin, direction.Unit * RAYCAST_DISTANCE, params)
     if not result then 
-        return true nil 
+        return true, nil 
     end
 
     local hitPart = result.Instance 

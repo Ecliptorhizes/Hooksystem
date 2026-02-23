@@ -2,7 +2,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
-local Maid = require(ReplicatedStorage.Packages.Maid)
+local Maid = require(ReplicatedStorage.Maid)
 
 local VOTE_DURATION_SEC = 15
 

@@ -8,9 +8,7 @@ local Maps: { [string]: MapInfo } = {
         name = "Dev Map",
         difficulty = "Normal",
         spawnPoints = {
-            CFrame.new(0, 5, 0),
-            CFrame.new(20, 5, 20),
-            CFrame.new(-20, 5, -20),
+            CFrame.new(300.113, -263.797, 333.048) * CFrame.Angles(0, math.rad(90), math.rad(90)),
         }
     },
     RatioIsland = {
