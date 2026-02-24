@@ -41,6 +41,15 @@ function MovementController:KnitStart()
                 end
             end
         elseif crouching and sprinting and moveDir.Magnitude > 0.1 then
+            local function isHooked()
+                for _, desc in character:GetDescendants() do
+                    if desc:IsA("Attachment") and (desc.Name == "HookAttachment_Left" or desc.Name == "HookAttachment_Right") then
+                        return true
+                    end
+                end
+                return false
+            end
+            if isHooked() then return end
             isSliding = true
             slideVelocity = moveDir * SLIDE_FORCE
             humanoid:ChangeState(Enum.HumanoidStateType.Physics)
