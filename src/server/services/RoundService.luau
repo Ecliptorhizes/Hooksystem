@@ -128,7 +128,7 @@ function RoundService:RecordDeath(player: Player)
     if s and not s.hadDied then 
         s.hadDied = true 
         s.bestTimeSeconds = math.floor(os.clock() - (s.roundStartTime or roundStartTime))
-    end 
+    end
 end 
 
 function RoundService:GetRoundState()

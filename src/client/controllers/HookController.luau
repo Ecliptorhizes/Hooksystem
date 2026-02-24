@@ -106,18 +106,6 @@ function HookController:KnitStart()
         end
         return Enum.ContextActionResult.Pass
     end, false, 10000, Enum.KeyCode.Space)
-    ContextActionService:BindActionAtPriority("HookSwingA", function(_, state)
-        if not (hookLeft or hookRight) then return Enum.ContextActionResult.Pass end
-        local force = (state == Enum.UserInputState.Begin) and -1 or 0
-        self.HookService:SetSwingForce(force):await()
-        return Enum.ContextActionResult.Sink
-    end, false, 10000, Enum.KeyCode.A)
-    ContextActionService:BindActionAtPriority("HookSwingD", function(_, state)
-        if not (hookLeft or hookRight) then return Enum.ContextActionResult.Pass end
-        local force = (state == Enum.UserInputState.Begin) and 1 or 0
-        self.HookService:SetSwingForce(force):await()
-        return Enum.ContextActionResult.Sink
-    end, false, 10000, Enum.KeyCode.D)
     local playerGui = player:WaitForChild("PlayerGui")
 
     local hookDistanceGui = playerGui:FindFirstChild("hookDistanceGui")
@@ -287,8 +275,6 @@ end
 
 function HookController:KnitDestroy()
     ContextActionService:UnbindAction("HookSpaceAction")
-    ContextActionService:UnbindAction("HookSwingA")
-    ContextActionService:UnbindAction("HookSwingD")
     if hookLeft then
         self.HookService:ReleaseHook(true):await()
     end

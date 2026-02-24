@@ -2,33 +2,8 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local HttpService = game:GetService("HttpService")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
-
-local _dbgLastSend = 0
-local _dbgThrottleMs = 500
-local function _dbg(loc: string, msg: string, data: { [string]: any }?, hyp: string?)
-	local now = os.clock() * 1000
-	if now - _dbgLastSend < _dbgThrottleMs then
-		return
-	end
-	_dbgLastSend = now
-	pcall(function()
-		HttpService:PostAsync(
-			"http://127.0.0.1:7370/ingest/3d0ecf27-f5dc-4258-87ce-54cd9abc4adb",
-			HttpService:JSONEncode({
-				sessionId = "1d329c",
-				id = "log_" .. os.clock() .. "_" .. math.random(1, 99999),
-				timestamp = os.clock() * 1000,
-				location = loc,
-				message = msg,
-				data = data or {},
-				hypothesisId = hyp or "A",
-			})
-		)
-	end)
-end
 local HookConfig = require(ReplicatedStorage.Core.Config.HookConfig)
 
 local HookService = Knit.CreateService({
@@ -175,13 +150,6 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 
 	local key = isLeft and "left" or "right"
 	local armPart = getArmPart(player.Character :: Model, isLeft)
-	_dbg("HookService:doAttach", "doAttach entry", {
-		armPartExists = armPart ~= nil,
-		armPartName = armPart and armPart.Name or "nil",
-		currentVel = hrp.AssemblyLinearVelocity.Magnitude,
-		hrpY = hrp.Position.Y,
-		hitY = hitPosition.Y,
-	}, "B")
 	local state = playerHooks[player.UserId]
 	if state and state[key] then
 		releaseHookData(state[key])
@@ -338,14 +306,14 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 
 	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if hum then
-		hum.PlatformStand = true
+		hum.PlatformStand = false
 		hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
 		hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
 		hum:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
 		if state.RagdollPreventionConn then
 			state.RagdollPreventionConn:Disconnect()
 		end
-		state.RagdollPreventionConn = hum.StateChanged:Connect(function(_old, new)
+		state.RagdollPreventionConn = hum.StateChanged:Connect(function(old, new)
 			if
 				new == Enum.HumanoidStateType.Ragdoll
 				or new == Enum.HumanoidStateType.FallingDown
@@ -368,13 +336,6 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 			end
 		end
 	end
-	local noAutoPullVal = HookConfig.NoAutoPull
-	_dbg(
-		"HookService:doAttach",
-		"Launch branch check",
-		{ noAutoPull = noAutoPullVal, useArmForce = HookConfig.UseArmForce },
-		"D"
-	)
 	if not HookConfig.NoAutoPull and not HookConfig.UseArmForce then
 		do
 			local mult = HookConfig.LaunchForceMultiplier or 12
@@ -401,17 +362,21 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 			if newVel.Y < -downwardCap then
 				newVel = Vector3.new(newVel.X, -downwardCap, newVel.Z)
 			end
-			_dbg("HookService:doAttach", "Launch applied", {
-				newVelMag = newVel.Magnitude,
-				newVelY = newVel.Y,
-				toTargetY = toTarget.Y,
-				wasCapped = (currentVel + toTarget).Magnitude > cap,
-				upwardCapped = (currentVel + toTarget).Y > upwardCap,
-			}, "D")
 			hrp.AssemblyLinearVelocity = newVel
 		end
 	else
-		_dbg("HookService:doAttach", "Launch skipped (NoAutoPull)", {}, "D")
+		if HookConfig.UseArmForce then
+			local toTarget = (hitPosition - hrp.Position).Unit
+			local tangent = toTarget:Cross(Vector3.new(0, 1, 0))
+			if tangent.Magnitude > 0.01 then
+				tangent = tangent.Unit
+				local kick = HookConfig.PendulumKickSpeed or 18
+				local vel = hrp.AssemblyLinearVelocity
+				if vel.Magnitude < kick * 0.5 then
+					hrp.AssemblyLinearVelocity = vel + tangent * kick
+				end
+			end
+		end
 	end
 
 	if not state.HeartbeatConn then
@@ -430,6 +395,26 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 					or st == Enum.HumanoidStateType.Physics
 				then
 					hum:ChangeState(Enum.HumanoidStateType.PlatformStanding)
+				end
+			end
+			if HookConfig.UseArmForce then
+				local leftData = s.left
+				local rightData = s.right
+				local boostWindow = (s.LastBoostTime and (tick() - s.LastBoostTime) < 0.6)
+				local swingVal = playerSwingForce[player.UserId] or 0
+				local vel = hrp2.AssemblyLinearVelocity
+				local velMag = vel.Magnitude
+				if not boostWindow and swingVal == 0 and velMag < (HookConfig.PendulumNudgeVelThreshold or 10) then
+					local firstData = leftData or rightData
+					if firstData then
+						local toTarget = (firstData.TargetAtt.WorldPosition - firstData.PlayerAtt.WorldPosition).Unit
+						local tangent = toTarget:Cross(Vector3.new(0, 1, 0))
+						if tangent.Magnitude > 0.01 then
+							tangent = tangent.Unit
+							local nudgeSpeed = HookConfig.PendulumNudgeSpeed or 22
+							hrp2.AssemblyLinearVelocity = tangent * nudgeSpeed
+						end
+					end
 				end
 			end
 		end)
@@ -514,24 +499,11 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 			local extendSpeed = HookConfig.RopeExtendSpeed or 22
 			local boostWindow = (s.LastBoostTime and (tick() - s.LastBoostTime) < 0.6)
 			local ropeDelta = 0
-			local ropeCause = "none"
 			if reelForceVal > 0 then
 				local reelMult = HookConfig.RopeReelInMultiplier or 1.0
 				ropeDelta = shortenSpeed * reelMult * delta
-				ropeCause = "reelIn"
 			elseif reelForceVal < 0 then
 				ropeDelta = -extendSpeed * delta
-				ropeCause = "reelOut"
-			end
-			if ropeDelta > 0 then
-				_dbg("HookService:Heartbeat", "Rope SHORTENING (reel in)", {
-					ropeCause = ropeCause,
-					ropeDelta = math.floor(ropeDelta * 100) / 100,
-					reelForceVal = math.floor(reelForceVal * 100) / 100,
-					boostWindow = boostWindow,
-					lastBoostAgo = s.LastBoostTime and math.floor((tick() - s.LastBoostTime) * 100) / 100 or nil,
-					NoAutoPull = HookConfig.NoAutoPull,
-				}, "REEL")
 			end
 			if leftData then
 				local originPos = leftData.PlayerAtt.WorldPosition
@@ -593,21 +565,6 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 				or (leftData and leftData.TargetAtt.WorldPosition or rightData.TargetAtt.WorldPosition)
 			local distToGoal = (goalPos - hrp.Position).Magnitude
 			local stopNearDist = HookConfig.StopNearAnchorDist or 2
-			local logThrottle = s._logTick or 0
-			if tick() - logThrottle > 0.3 or velocity.Y > 80 or velocity.Y < -100 then
-				s._logTick = tick()
-				_dbg("HookService:Heartbeat", "Physics state", {
-					distToGoal = math.floor(distToGoal * 10) / 10,
-					stopNear = distToGoal < stopNearDist,
-					boostWindow = boostWindow,
-					reelForceVal = reelForceVal,
-					swingVal = swingVal,
-					velMag = math.floor(velocityMag * 10) / 10,
-					velY = math.floor(velocity.Y * 10) / 10,
-					hrpY = math.floor(hrp.Position.Y * 10) / 10,
-					dual = (leftData and rightData) or false,
-				}, "A")
-			end
 			local baseVel: Vector3
 			if HookConfig.UseGrapplePhysics then
 				local grappleSpeed = (leftData and rightData) and (HookConfig.GrappleSpeedDual or 300)
@@ -628,12 +585,6 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 				if multiplier > 0 then
 					if distToGoal < stopNearDist then
 						baseVel = Vector3.zero
-						_dbg(
-							"HookService:Heartbeat",
-							"StopNearAnchor",
-							{ distToGoal = distToGoal, hrpY = hrp.Position.Y },
-							"B"
-						)
 					else
 						baseVel = dir * (grappleSpeed * multiplier) + orbitVelocity
 						if boostWindow then
@@ -704,17 +655,28 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 						return
 					end
 					local toTarget = (data.TargetAtt.WorldPosition - data.PlayerAtt.WorldPosition).Unit
-					local mag = HookConfig.ArmPullForce or 3500
-					if reelForceVal > 0 then
-						mag = HookConfig.ArmReelForce or 7000
+					local mag = 0
+					if HookConfig.NoAutoPull then
+						if boostWindow then
+							mag = HookConfig.ArmPullForce or 3500
+							local rampSec = HookConfig.ArmForceRampUpSec or 0.4
+							local elapsed = tick() - (data.AttachTime or tick())
+							local ramp = rampSec > 0 and math.min(1, elapsed / rampSec) or 1
+							mag = mag * ramp
+						end
+					else
+						mag = HookConfig.ArmPullForce or 3500
+						if reelForceVal > 0 then
+							mag = HookConfig.ArmReelForce or 7000
+						end
+						local rampSec = HookConfig.ArmForceRampUpSec or 0.4
+						local elapsed = tick() - (data.AttachTime or tick())
+						local ramp = rampSec > 0 and math.min(1, elapsed / rampSec) or 1
+						mag = mag * ramp
 					end
-					local rampSec = HookConfig.ArmForceRampUpSec or 0.4
-					local elapsed = tick() - (data.AttachTime or tick())
-					local ramp = rampSec > 0 and math.min(1, elapsed / rampSec) or 1
-					mag = mag * ramp
 					local force = toTarget * mag
 					if boostWindow then
-						force = force + (hrp.CFrame.LookVector * (HookConfig.ArmBoostForce or 6000))
+						force = force + (hrp.CFrame.LookVector * (HookConfig.ArmBoostForce or 100))
 					end
 					local swingVal = playerSwingForce[player.UserId] or 0
 					if swingVal ~= 0 then
@@ -740,13 +702,6 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 				local downwardCap = HookConfig.PullDownwardCap or 60
 				if baseVel.Y < -downwardCap then
 					baseVel = Vector3.new(baseVel.X, -downwardCap, baseVel.Z)
-				end
-				if baseVel.Y > 100 or baseVel.Magnitude > 350 then
-					_dbg("HookService:Heartbeat", "High velocity applied", {
-						baseVelY = math.floor(baseVel.Y * 10) / 10,
-						baseVelMag = math.floor(baseVel.Magnitude * 10) / 10,
-						boostWindow = boostWindow,
-					}, "C")
 				end
 				if state.LinearVelocity then
 					if state.LinearVelocity:IsA("VectorForce") then
@@ -814,18 +769,6 @@ function HookService:RequestFireHook(
 	direction: Vector3,
 	isLeft: boolean
 ): (boolean, string?)
-	if player.Character then
-		local hrp0 = player.Character:FindFirstChild("HumanoidRootPart")
-		local hum = player.Character:FindFirstChildOfClass("Humanoid")
-		local vel = hrp0 and hrp0.AssemblyLinearVelocity or Vector3.zero
-		local state = hum and hum:GetState() or nil
-		_dbg("HookService:RequestFireHook", "FireHook requested", {
-			velMag = vel.Magnitude,
-			velY = vel.Y,
-			humanoidState = state and tostring(state) or "nil",
-			originY = origin.Y,
-		}, "A")
-	end
 	if not player.Character then
 		return false, "No character"
 	end
@@ -900,14 +843,6 @@ function HookService:RequestFireHook(
 			end
 			projectileBeam:Destroy()
 			local dist = (rayResult.Position - startPos).Magnitude
-			_dbg("HookService:RequestFireHook", "Projectile hit", {
-				hitInstance = rayResult.Instance and rayResult.Instance:GetFullName() or "nil",
-				hitInChar = rayResult.Instance and player.Character and rayResult.Instance:IsDescendantOf(
-					player.Character
-				),
-				dist = dist,
-				inRange = dist <= HookConfig.MaxRange,
-			}, "C")
 			if dist <= HookConfig.MaxRange and rayResult.Instance:IsA("BasePart") then
 				local ok, err = doAttach(player, rayResult.Instance, rayResult.Position, isLeft)
 				result:Fire(ok, err)
@@ -985,36 +920,15 @@ end
 
 function HookService:RequestBoost(player: Player, isLeft: boolean): boolean
 	local state = playerHooks[player.UserId]
-	local hasState = state ~= nil
-	local hasChar = player.Character ~= nil
-	local hasLeft = state and state.left ~= nil
-	local hasRight = state and state.right ~= nil
-	local gas = getGas(player)
-	_dbg("HookService:RequestBoost", "RequestBoost called", {
-		hasState = hasState,
-		hasChar = hasChar,
-		hasLeft = hasLeft,
-		hasRight = hasRight,
-		gas = gas,
-		cost = HookConfig.BoostCost,
-	}, "B")
 	if not state or not player.Character then
-		_dbg("HookService:RequestBoost", "Boost rejected", { reason = "no state or char" }, "B")
 		return false
 	end
 	local leftData = state.left
 	local rightData = state.right
 	if not leftData and not rightData then
-		_dbg("HookService:RequestBoost", "Boost rejected", { reason = "no hook data" }, "B")
 		return false
 	end
 	if not spendGas(player, HookConfig.BoostCost) then
-		_dbg(
-			"HookService:RequestBoost",
-			"Boost rejected",
-			{ reason = "insufficient gas", gas = getGas(player), cost = HookConfig.BoostCost },
-			"B"
-		)
 		return false
 	end
 
@@ -1059,12 +973,6 @@ function HookService:RequestBoost(player: Player, isLeft: boolean): boolean
 		state.LinearVelocity.VectorVelocity = newVel
 	end
 	hrp.AssemblyLinearVelocity = newVel
-	_dbg("HookService:RequestBoost", "Boost applied", {
-		impulseMag = math.floor(impulse.Magnitude * 10) / 10,
-		newVelMag = math.floor(newVel.Magnitude * 10) / 10,
-		newVelY = math.floor(newVel.Y * 10) / 10,
-		JumpBoostForce = HookConfig.JumpBoostForce,
-	}, "D")
 	return true
 end
 
@@ -1091,10 +999,6 @@ function HookService:ReleaseHook(player: Player, isLeft: boolean)
 	if not state.left and not state.right then
 		local hrp0 = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 		if hrp0 then
-			_dbg("HookService:ReleaseHook", "Full release", {
-				velMag = math.floor(hrp0.AssemblyLinearVelocity.Magnitude * 10) / 10,
-				velY = math.floor(hrp0.AssemblyLinearVelocity.Y * 10) / 10,
-			}, "E")
 			local ret = HookConfig.ReleaseVelocityRetention or 1
 			if ret < 1 then
 				local v = hrp0.AssemblyLinearVelocity
@@ -1146,7 +1050,6 @@ end
 
 function HookService:SetSwingForce(player: Player, force: number)
 	local clamped = math.clamp(force, -1, 1)
-	_dbg("HookService:SetSwingForce", "Swing force set", { force = clamped, userId = player.UserId }, "E")
 	playerSwingForce[player.UserId] = clamped
 end
 
@@ -1179,10 +1082,6 @@ function HookService:GetGas(player: Player): number
 end
 
 function HookService:SetReelForce(player: Player, force: number)
-	_dbg("HookService:SetReelForce", "Reel force set", {
-		force = math.floor(force * 100) / 100,
-		userId = player.UserId,
-	}, "REEL")
 	playerReelForce[player.UserId] = force
 end
 

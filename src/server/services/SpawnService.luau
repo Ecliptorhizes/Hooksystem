@@ -32,6 +32,10 @@ function SpawnService:SetCurrentMap(mapId: string)
     currentMapId = mapId
 end
 
+function SpawnService:GetCurrentMap(): string
+    return currentMapId
+end
+
 function SpawnService:CleanPlayerFromRound(player: Player)
     playerInRound[player.UserId] = nil
 end
@@ -63,7 +67,6 @@ function SpawnService:RequestSpawn(player: Player): (boolean, string?)
 
     hrp.CFrame = spawnCf 
     playerInRound[player.UserId] = true 
-
     return true, nil
 end
 
