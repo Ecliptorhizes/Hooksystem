@@ -1,0 +1,9 @@
+{
+  "name": "DevTuningBridge",
+  "tree": {
+    "$className": "Plugin",
+    "DevTuningBridge": {
+      "$path": "DevTuningBridge.lua"
+    }
+  }
+}

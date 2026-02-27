@@ -5,3 +5,6 @@ ServerPackages/*
 *.rbxlx
 *.rbxm
 *.rbxmx
+
+# Dev server
+dev-server/node_modules/

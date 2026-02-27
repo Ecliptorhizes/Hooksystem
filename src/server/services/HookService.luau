@@ -1093,6 +1093,32 @@ function HookService.Client:GetGas(player: Player)
 	return self.Server:GetGas(player)
 end
 
+-- Dev tuning: returns live hook data for the dashboard (Studio only)
+function HookService:GetDebugData(player: Player): { [string]: any }
+	local state = playerHooks[player.UserId]
+	local gas = getGas(player)
+	local leftLen, rightLen = nil, nil
+	if state then
+		if state.left and state.left.Constraint then
+			leftLen = state.left.Constraint:IsA("SpringConstraint") and state.left.Constraint.FreeLength
+				or (state.left.Constraint :: RopeConstraint).Length
+		end
+		if state.right and state.right.Constraint then
+			rightLen = state.right.Constraint:IsA("SpringConstraint") and state.right.Constraint.FreeLength
+				or (state.right.Constraint :: RopeConstraint).Length
+		end
+	end
+	return {
+		gas = gas,
+		reelForce = playerReelForce[player.UserId] or 0,
+		swingForce = playerSwingForce[player.UserId] or 0,
+		hasLeft = state and state.left ~= nil,
+		hasRight = state and state.right ~= nil,
+		leftRopeLen = leftLen,
+		rightRopeLen = rightLen,
+	}
+end
+
 function HookService:KnitInit()
 	for _, player in Players:GetPlayers() do
 		playerGas[player.UserId] = HookConfig.MaxGas
