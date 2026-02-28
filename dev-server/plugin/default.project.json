@@ -3,7 +3,7 @@
   "tree": {
     "$className": "Plugin",
     "DevTuningBridge": {
-      "$path": "DevTuningBridge.lua"
+      "$path": "DevTuningBridge.plugin.lua"
     }
   }
 }

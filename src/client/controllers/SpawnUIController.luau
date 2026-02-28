@@ -7,7 +7,6 @@ local Maid = require(ReplicatedStorage.Maid)
 local SpawnUIController = Knit.CreateController({
 	Name = "SpawnUIController",
 })
--- i did something here
 local maid = Maid.new()
 
 function SpawnUIController:KnitStart()
@@ -18,7 +17,6 @@ function SpawnUIController:KnitStart()
 
 	local mainLobby = PlayerGui:WaitForChild("MainLobby", 30)
 	if not mainLobby then
-		-- Fallback: find any ScreenGui with a Deploy descendant
 		for _, gui in PlayerGui:GetChildren() do
 			if gui:IsA("ScreenGui") and gui:FindFirstChild("Deploy", true) then
 				mainLobby = gui

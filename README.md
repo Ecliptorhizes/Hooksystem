@@ -7,6 +7,7 @@ npm install
 npm start
 ```
 
-Runs **Rojo** (live sync) + **tuning server** (live controls). Connect Studio to `localhost:34872`, open http://localhost:34873.
+- **Rojo** (34872): Syncs game files only. Connect Studio to `localhost:34872`.
+- **Node** (34873): Zipshot Live Tuning only. Open http://localhost:34873.
 
-- **Sliders**: Node writes `TuningOverrides.txt` → Rojo syncs → game applies (no plugin needed)
+**Separation:** Rojo syncs Rojo. Node runs tuning. See [ARCHITECTURE.md](ARCHITECTURE.md).

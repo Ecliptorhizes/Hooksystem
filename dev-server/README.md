@@ -1,20 +1,27 @@
-# Zipshot Dev Server
+# Zipshot Dev Server (Node.js Only)
 
-Live tuning dashboard for hook physics. Adjust values in the browser while the game runs in Roblox Studio.
+Live tuning dashboard for hook physics. **Node.js only** – no Rojo, no sync.
 
-## One command: live sync + live tuning
+## Separation
 
-Like `npx rbxtsc -w` for TypeScript, run one command to get everything:
+- **Rojo** = syncs game files (src/) to Studio. Run with `npm run rojo`.
+- **Node** = Zipshot Live Tuning. Run with `npm run tuning`.
+
+## Run
 
 ```bash
-# From project root (installs deps first if needed)
-npm install
-npm start
+# Tuning server only (Node.js)
+npm run tuning
 ```
 
-This runs:
-- **Rojo** (port 34872) – live sync: file changes → Studio
-- **Tuning server** (port 34873) – live tuning: sliders → game in real time
+Or run both together:
+
+```bash
+npm start   # Rojo + Node
+```
+
+- **Rojo** (34872) – syncs game files only
+- **Node** (34873/34874) – tuning dashboard only
 
 **Workflow:**
 1. `npm start` (or `npm run dev`)
@@ -32,14 +39,18 @@ npm install
 
 ## Configuration
 
-Edit `dev-server/zipshot_config.json` to change ports:
+Edit `dev-server/zipshot_config.json`:
 
 ```json
 {
   "httpPort": 34873,
-  "wsWebPort": 34874
+  "wsWebPort": 34874,
+  "openCloudApiKey": "your Open Cloud API key",
+  "universeId": "your game's universe ID"
 }
 ```
+
+**Open Cloud (Node → Game):** For real-time config from the web dashboard to the game without localhost, add `openCloudApiKey` and `universeId`. Get the API key at [create.roblox.com](https://create.roblox.com) → Open Cloud → API Keys. Find your universe ID in Game Settings → General.
 
 ## Run options
 
@@ -63,7 +74,11 @@ Edit `dev-server/zipshot_config.json` to change ports:
 
 3. Open **http://localhost:34873** in your browser
 
-4. Press **Play** in Studio – sliders apply in real time. (Live feed is not available; Roblox blocks server scripts from localhost.)
+4. Press **Play** in Studio – sliders apply in real time.
+
+**Node → Game via Open Cloud:** When `openCloudApiKey` and `universeId` are set, slider changes are published to Roblox MessagingService. The game subscribes and applies config in real time.
+
+**Live data (Game → Node):** Roblox blocks HTTP from the game to localhost. On startup, the server writes your machine's local IP (e.g. `http://192.168.1.5:34873`) to `DevServerUrl.txt`. Rojo syncs that into the game. The game POSTs live data to that URL. Ensure Rojo is running so the game gets the updated URL.
 
 ## API
 
@@ -80,4 +95,4 @@ Edit `dev-server/zipshot_config.json` to change ports:
 - **Architecture** (inspired by [PIDebug](https://github.com/Sleitnick/PIDebug)): HTTP API + WebSocket for real-time push
 - **DevTuningServer** (src/server/DevTuningServer.luau) runs only in Studio
 - Reads `TuningOverrides.txt` via Rojo sync and applies overrides to HookConfig
-- **Config only**: no plugin, no live feed (Roblox blocks localhost from server scripts)
+- **Config**: Rojo sync (TuningOverrides.txt), HTTP poll, or Open Cloud MessagingService (when configured).

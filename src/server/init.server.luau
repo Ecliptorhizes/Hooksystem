@@ -4,7 +4,8 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 
-local services = script.Parent:FindFirstChild("services")
+-- init.server makes folder a Script; services and DevTuningServer are script's children
+local services = script:FindFirstChild("services")
 	or (script.Parent:FindFirstChild("Server") and script.Parent.Server:FindFirstChild("services"))
 	or ServerScriptService:FindFirstChild("services")
 	or (ServerScriptService:FindFirstChild("Server") and ServerScriptService.Server:FindFirstChild("services"))
@@ -15,11 +16,17 @@ end
 
 Knit.AddServices(services)
 Knit.Start():andThen(function()
-	-- Dev tuning: poll localhost for config overrides + post HookService live data (Studio only)
 	if RunService:IsStudio() then
-		local DevTuningServer = script.Parent:FindFirstChild("DevTuningServer")
+		-- init.server makes the folder a Script; DevTuningServer is script's child, not script.Parent's
+		local DevTuningServer = script:FindFirstChild("DevTuningServer")
 		if DevTuningServer then
 			require(DevTuningServer)
+			print("[Zipshot] DevTuningServer loaded.")
+		else
+			warn("[Zipshot] DevTuningServer not found in", script:GetFullName())
 		end
 	end
-end):catch(warn)
+	return nil
+end):catch(function(err)
+	warn("[Zipshot] Knit.Start or DevTuningServer failed:", tostring(err))
+end)

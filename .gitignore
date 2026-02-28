@@ -8,3 +8,4 @@ ServerPackages/*
 
 # Dev server
 dev-server/node_modules/
+dev-server/zipshot_config.json

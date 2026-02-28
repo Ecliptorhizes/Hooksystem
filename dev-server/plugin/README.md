@@ -1,31 +1,27 @@
 # DevTuningBridge Plugin
 
-Bridges live game data to the tuning dashboard. **No publishing required** – install locally by copying the `.rbxm` file.
+Bridges live game data to the tuning dashboard. **No publishing required** – install locally.
 
-## Install (one-time)
+## Install (choose one method)
 
-### 1. Build the plugin
+### Method A: Built plugin (.rbxm / .rbxmx)
 
-From project root:
-```bash
-cd dev-server/plugin
-rojo build -o DevTuningBridge.rbxm
-```
+1. **Build:** From project root run `npm run build:plugin`
+2. **Copy:** Plugins → Plugins Folder → copy `DevTuningBridge.rbxm` (or `DevTuningBridge.rbxmx`) from `dev-server/plugin/` into that folder
+3. **Restart Studio** (or Plugins → Manage Plugins → enable DevTuningBridge)
 
-Or from project root:
-```bash
-npm run build:plugin
-```
-(Add this script to root `package.json` if needed.)
+**Mac Plugins folder:** `~/Library/Application Support/Roblox/Plugins`
 
-### 2. Copy to Plugins folder
+### Method B: Manual install (if Studio doesn't recognize the .rbxm)
 
-1. Open **Roblox Studio**
-2. Go to **Plugins** → **Plugins Folder** (opens your plugins folder in Finder/Explorer)
-3. Copy `DevTuningBridge.rbxm` from `dev-server/plugin/` into that folder
-4. **Restart Studio** (or go to Plugins → Manage Plugins and enable DevTuningBridge)
+1. In Studio: ServerStorage → Insert Object → **Script** → rename to `DevTuningBridge`
+2. Copy the full contents of `DevTuningBridge.plugin.lua` into the script
+3. With the script selected: **Plugins** → **Save as Local Plugin** → Save
+4. Restart Studio
 
-### 3. Enable HttpService
+See `INSTALL_MANUAL.md` for detailed steps.
+
+### Enable HttpService
 
 **Game Settings** → **Security** → enable **Allow HTTP Requests**
 
@@ -38,9 +34,12 @@ npm run build:plugin
 
 You should see in Output:
 - `[DevTuningServer] Bridge created...`
-- `[DevTuningBridge] Plugin ready. Dev server: http://localhost:34873`
-- `[DevTuningBridge] Connected. Live data flowing to dashboard.`
+- `[DevTuningServer]` live data POSTs to the dev server (game uses local IP from DevServerUrl.txt)
 
-## What it does
+The plugin shows status in its GUI but cannot relay live data (see limitation above). The game sends it directly.
 
-The game writes live data (velocity, hook state, position) to `ReplicatedStorage.DevTuningBridge.LiveData`. The plugin reads it and POSTs to localhost. Roblox blocks server scripts from localhost, but plugins can reach it.
+## Why the plugin exists (and its limitation)
+
+**Roblox plugins cannot see the running game's data.** Plugins run in a separate DataModel from the game. When you press Play, the game runs in a runtime copy; the plugin still sees the edit DataModel, so it never sees `DevTuningBridge.LiveData`.
+
+**Live data flow:** The game (DevTuningServer) POSTs directly to the Node server. Roblox blocks localhost, so the server writes your machine's local IP (e.g. `http://192.168.1.5:34873`) to `DevServerUrl.txt` on startup. Rojo syncs that into the game. The game then POSTs to that URL, which works.

@@ -72,7 +72,6 @@ local function getParticleEmitter(container: Instance): ParticleEmitter?
 	return nil
 end
 
--- First person + in-air. Physics: |velocity| >= limit in ANY 3D direction (forward, back, up, down, sideways) = show.
 local showingVFX = false
 local FIRST_PERSON_DIST = 2.5
 
@@ -105,7 +104,6 @@ local function shouldShowSpeedVFX(velocity: Vector3, camera: Camera, hrp: BasePa
 	return showingVFX
 end
 
--- Scale VFX by speed: 0 at limitSpeed, 1 at maxSpeed. Faster = more extreme.
 local function getScaleFactor(velocityMag: number): number
 	local limitSpeed = HookConfig.SpeedVFXLimitSpeed or 30
 	local maxSpeed = HookConfig.SpeedVFXMaxSpeed or 1000

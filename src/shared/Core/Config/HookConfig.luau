@@ -1,4 +1,6 @@
 return {
+	DevTuningServerUrl = "http://localhost:34873",
+
 	MaxRange = 800,
 	BeamThickness = 0.15,
 	JumpBoostWindow = 0.5,
@@ -71,12 +73,8 @@ return {
 	MaxVelocityWhileHooked = nil,
 	GravityScaleWhenHooked = 0.5,
 
-	-- Speed VFX (client) - first person, in-air only. Physics: |velocity| >= limit in ANY direction = show.
-	-- Limit speed (studs/s): forward, backward, up, down, sideways - any 3D direction.
-	SpeedVFXLimitSpeed = 100, -- 30
-	-- Hysteresis: hide when below this (prevents flicker)
-	SpeedVFXHideBelowSpeed = 40, -- 22
-	-- Max speed for scale (studs/s). VFX intensity scales from limitSpeed to this.
+	SpeedVFXLimitSpeed = 100,
+	SpeedVFXHideBelowSpeed = 40,
 	SpeedVFXMaxSpeed = 1000,
 	SpeedVFXScaleMin = 0.5,
 	SpeedVFXScaleMax = 1.5,

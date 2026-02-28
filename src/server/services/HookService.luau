@@ -1093,7 +1093,6 @@ function HookService.Client:GetGas(player: Player)
 	return self.Server:GetGas(player)
 end
 
--- Dev tuning: returns live hook data for the dashboard (Studio only)
 function HookService:GetDebugData(player: Player): { [string]: any }
 	local state = playerHooks[player.UserId]
 	local gas = getGas(player)

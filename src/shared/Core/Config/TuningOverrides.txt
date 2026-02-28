@@ -1,1 +1,1 @@
-{"LaunchForceMultiplier":1,"LaunchVelocityCap":0,"LaunchUpwardCap":0,"LaunchDownwardCap":0,"SwingForce":0,"PendulumMomentum":0,"ReelPendulumMomentum":0,"GrappleSpeedSingle":0,"GrappleSpeedDual":0,"ReelInSpeedMultiplier":0.5,"ArmPullForce":0,"ArmReelForce":0,"ArmBoostForce":0,"MomentumRetention":0,"GravityScaleWhenHooked":0,"PullForceDual":0,"PullForceSingle":0}
+{"PullForceSingle":94,"ReelInPullForce":100,"SwingForce":0}

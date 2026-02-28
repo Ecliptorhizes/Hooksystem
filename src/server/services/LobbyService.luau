@@ -56,7 +56,6 @@ function LobbyService:KnitStart()
     end
 
     Players.PlayerAdded:Connect(function(player)
-        -- Connect CharacterAdded BEFORE LoadProfile so we never miss the initial spawn
         player.CharacterAdded:Connect(function(character)
             handleCharacterSpawn(player, character)
             local checkCount = 0
