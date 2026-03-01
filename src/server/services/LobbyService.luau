@@ -15,6 +15,7 @@ local LobbyService = Knit.CreateService({
 
 local SpawnService
 
+-- Move character to lobby spawn (LOBBY_SPAWN_CFRAME)
 local function teleportToLobby(character)
     local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 2)
     if hrp then
@@ -22,6 +23,7 @@ local function teleportToLobby(character)
     end
 end
 
+-- Move character to a random spawn point for the current map (from MapRegistry)
 local function teleportToMap(character, _player)
     local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 2)
     if not hrp then return end
@@ -32,6 +34,7 @@ local function teleportToMap(character, _player)
     hrp.CFrame = spawnCf
 end
 
+-- True if position is within LOBBY_RADIUS of lobby spawn
 local function isInLobby(pos: Vector3): boolean
     return (pos - LOBBY_SPAWN_CFRAME.Position).Magnitude < LOBBY_RADIUS
 end
@@ -39,6 +42,7 @@ end
 function LobbyService:KnitInit()
 end
 
+-- KnitStart: wire CharacterAdded and Heartbeat; teleport to lobby or map based on round state
 function LobbyService:KnitStart()
     SpawnService = Knit.GetService("SpawnService")
 
@@ -46,6 +50,7 @@ function LobbyService:KnitStart()
         return (SpawnService:IsPlayerInRound(p) or 0) == 1
     end
 
+    -- In round → map spawn; not in round → lobby
     local function handleCharacterSpawn(player: Player, character: Model)
         if isInRound(player) then
             teleportToMap(character, player)
@@ -57,6 +62,7 @@ function LobbyService:KnitStart()
     Players.PlayerAdded:Connect(function(player)
         player.CharacterAdded:Connect(function(character)
             handleCharacterSpawn(player, character)
+            -- Heartbeat: if not in round and outside lobby, pull back to lobby
             local checkCount = 0
             local conn
             conn = RunService.Heartbeat:Connect(function()
@@ -80,6 +86,7 @@ function LobbyService:KnitStart()
         end
     end)
 
+    -- Handle players already in game (e.g. on server restart)
     for _, player in Players:GetPlayers() do
         if player.Character then
             handleCharacterSpawn(player, player.Character)

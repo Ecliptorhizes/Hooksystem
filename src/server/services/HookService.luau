@@ -20,6 +20,7 @@ local HookService = Knit.CreateService({
 	},
 })
 
+-- Data for a single attached hook (left or right)
 type HookData = {
 	Constraint: RopeConstraint | SpringConstraint,
 	BeamPart: BasePart,
@@ -30,6 +31,7 @@ type HookData = {
 	AttachTime: number?,
 }
 
+-- Per-player state: both hooks, velocity mover, ragdoll prevention, etc.
 type PlayerHookState = {
 	left: HookData?,
 	right: HookData?,
@@ -51,6 +53,7 @@ local playerHooks: { [number]: PlayerHookState? } = {}
 local playerGas: { [number]: number } = {}
 local sharedWorldAnchor: BasePart? = nil
 
+-- World anchor for LinearVelocity when UseVelocityConstraints: used as Attachment1 reference
 local function getWorldAnchor(): BasePart
 	if not sharedWorldAnchor or not sharedWorldAnchor.Parent then
 		local p = Instance.new("Part")
@@ -68,6 +71,7 @@ local playerProjectileCancel: { [number]: { left: boolean, right: boolean } } = 
 local playerReelForce: { [number]: number } = {}
 local playerSwingForce: { [number]: number } = {}
 
+-- Gas: get current, spend (returns false if insufficient), regen over time
 local function getGas(player: Player): number
 	if not playerGas[player.UserId] then
 		playerGas[player.UserId] = HookConfig.MaxGas
@@ -92,6 +96,7 @@ local function regenGas(player: Player, delta: number)
 	playerGas[player.UserId] = math.min(HookConfig.MaxGas, gas + HookConfig.GasRegenPerSec * delta)
 end
 
+-- Clean up constraint, beam, attachments, arm force for one hook
 local function releaseHookData(data: HookData)
 	if data.ArmForce then
 		data.ArmForce:Destroy()
@@ -103,6 +108,7 @@ local function releaseHookData(data: HookData)
 	end
 end
 
+-- Left/Right arm part for attachment origin; falls back to HRP if not found
 local function getArmPart(character: Model, isLeft: boolean): BasePart?
 	local names = isLeft and { "Left Arm" } or { "Right Arm" }
 	for _, name in names do
@@ -114,6 +120,7 @@ local function getArmPart(character: Model, isLeft: boolean): BasePart?
 	return nil
 end
 
+-- Rotate vector `from` toward `to` by at most `maxRad` radians (used for reel angle)
 local function rotateTowards(from: Vector3, to: Vector3, maxRad: number): Vector3
 	local fromMag = from.Magnitude
 	if fromMag < 0.0001 then
@@ -134,6 +141,7 @@ local function rotateTowards(from: Vector3, to: Vector3, maxRad: number): Vector
 	return (CFrame.fromAxisAngle(axis.Unit, rotateBy) * fromNorm).Unit
 end
 
+-- World position where hook originates from arm (offset by HookArmForwardOffset, HookArmSideOffset)
 local function getHookOriginWorldPos(armPart: BasePart, hrp: BasePart, isLeft: boolean): Vector3
 	local look = hrp.CFrame.LookVector
 	local right = hrp.CFrame.RightVector
@@ -142,6 +150,7 @@ local function getHookOriginWorldPos(armPart: BasePart, hrp: BasePart, isLeft: b
 	return armPart.Position + forward + side
 end
 
+-- Core attach logic: create Rope/SpringConstraint, beam Part, attachments, arm force; set up heartbeat physics
 local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vector3, isLeft: boolean): (boolean, string?)
 	local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	if not hrp then
@@ -172,6 +181,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 	targetAtt.Position = targetPart.CFrame:PointToObjectSpace(hitPosition)
 	targetAtt.Parent = targetPart
 
+	-- Create RopeConstraint or SpringConstraint between player attachment and target
 	local constraint: RopeConstraint | SpringConstraint
 	if HookConfig.UseSpringConstraint then
 		local spring = Instance.new("SpringConstraint")
@@ -194,6 +204,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 		constraint = rope
 	end
 
+	-- Visual beam Part (anchored, neon) between player and anchor
 	local beam = Instance.new("Part")
 	beam.Name = "HookBeam_" .. (isLeft and "Left" or "Right")
 	beam.Anchored = true
@@ -208,6 +219,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 	beam.Position = (originPos + targetAtt.WorldPosition) / 2
 	beam.Parent = Workspace
 
+	-- Optional VectorForce on arm for pendulum-style pull (UseArmForce mode)
 	local armForce: VectorForce? = nil
 	if HookConfig.UseArmForce then
 		local vf = Instance.new("VectorForce")
@@ -230,6 +242,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 		AttachTime = tick(),
 	}
 
+	-- First hook for this player: create velocity mover (VectorForce or LinearVelocity), gravity reduction, state
 	if not state then
 		local velAtt = (not HookConfig.UseArmForce) and Instance.new("Attachment") or nil
 		if velAtt then
@@ -304,6 +317,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 
 	state[key] = hookData
 
+	-- Ragdoll prevention: disable ragdoll/falling, reconnect StateChanged to force PlatformStanding if triggered
 	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if hum then
 		hum.PlatformStand = false
@@ -336,6 +350,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 			end
 		end
 	end
+	-- Initial launch impulse when NoAutoPull is false (instant pull toward target)
 	if not HookConfig.NoAutoPull and not HookConfig.UseArmForce then
 		do
 			local mult = HookConfig.LaunchForceMultiplier or 12
@@ -379,6 +394,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 		end
 	end
 
+	-- PreSimulation: rope length, beam update, velocity, arm force; PostSimulation: ragdoll recovery, pendulum nudge
 	if not state.HeartbeatConn then
 		state.RagdollPostSimConn = RunService.PostSimulation:Connect(function()
 			local s = playerHooks[player.UserId]
@@ -454,6 +470,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 					hrp.AssemblyLinearVelocity = vel.Unit * velCap
 				end
 			end
+			-- Void kill: below VoidFloorY, release hooks and dampen velocity
 			local voidFloor = HookConfig.VoidFloorY or -350
 			if hrp.Position.Y < voidFloor then
 				if leftData then
@@ -492,6 +509,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 				* (1 + velocityMag * 0.01)
 			local pullForce = (leftData and rightData) and HookConfig.PullForceDual or HookConfig.PullForceSingle
 			local reelInPull = HookConfig.ReelInPullForce or pullForce
+			-- reelForceVal: positive = reel in, negative = extend. From client SetReelForce (W/S or similar)
 			local reelForceVal =
 				math.clamp(playerReelForce[player.UserId] or 0, -HookConfig.ReelForceRange, HookConfig.ReelForceRange)
 
@@ -565,6 +583,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 				or (leftData and leftData.TargetAtt.WorldPosition or rightData.TargetAtt.WorldPosition)
 			local distToGoal = (goalPos - hrp.Position).Magnitude
 			local stopNearDist = HookConfig.StopNearAnchorDist or 2
+			-- UseGrapplePhysics: direct velocity toward anchor. Else: pendulum-style with momentum.
 			local baseVel: Vector3
 			if HookConfig.UseGrapplePhysics then
 				local grappleSpeed = (leftData and rightData) and (HookConfig.GrappleSpeedDual or 300)
@@ -649,6 +668,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 				baseVel = velocity * momentum + baseVel * (1 - momentum)
 			end
 
+			-- UseArmForce: apply VectorForce on arm attachment toward target (pendulum feel)
 			if HookConfig.UseArmForce then
 				local function updateArmForce(data: HookData)
 					if not data.ArmForce then
@@ -728,6 +748,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 	return true, nil
 end
 
+-- Client calls this with raycast hit (targetPart, hitPosition). Validates range, gas, then attaches.
 function HookService:RequestHook(
 	player: Player,
 	targetPart: BasePart,
@@ -763,6 +784,7 @@ function HookService:RequestHook(
 	return doAttach(player, targetPart, hitPosition, isLeft)
 end
 
+-- Projectile phase: fire hook from origin in direction, raycast each frame until hit or max range
 function HookService:RequestFireHook(
 	player: Player,
 	origin: Vector3,
@@ -792,6 +814,7 @@ function HookService:RequestFireHook(
 	end
 	cancel[key] = false
 
+	-- Projectile loop: move pos each frame, raycast for hit; cancel if ReleaseHook called
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { player.Character }
@@ -881,6 +904,7 @@ function HookService:RequestFireHook(
 	return ok, err
 end
 
+-- Jump while hooked: angle > 90° = reel in; else = boost toward anchor. Costs JumpCost gas.
 function HookService:RequestJump(player: Player, isLeft: boolean): boolean
 	local state = playerHooks[player.UserId]
 	if not state or not player.Character then
@@ -918,6 +942,7 @@ function HookService:RequestJump(player: Player, isLeft: boolean): boolean
 	return true
 end
 
+-- Boost: add impulse toward anchor. Costs BoostCost gas. Sets LastBoostTime for boost window.
 function HookService:RequestBoost(player: Player, isLeft: boolean): boolean
 	local state = playerHooks[player.UserId]
 	if not state or not player.Character then
@@ -976,6 +1001,7 @@ function HookService:RequestBoost(player: Player, isLeft: boolean): boolean
 	return true
 end
 
+-- Release one hook. If both released, clean up state, restore ragdoll, apply ReleaseVelocityRetention.
 function HookService:ReleaseHook(player: Player, isLeft: boolean)
 	local key = isLeft and "left" or "right"
 	local cancel = playerProjectileCancel[player.UserId]
@@ -1154,6 +1180,7 @@ function HookService:GetDebugData(player: Player): { [string]: any }
 	}
 end
 
+-- Init: set gas for players, clean up on leave, heartbeat gas regen when not hooked
 function HookService:KnitInit()
 	for _, player in Players:GetPlayers() do
 		playerGas[player.UserId] = HookConfig.MaxGas
