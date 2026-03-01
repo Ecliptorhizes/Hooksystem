@@ -37,19 +37,6 @@ flowchart TB
     Attach -->|"creates"| Physics
     Config -.->|"tuning params"| HS
 ```
-
-```mermaid
-flowchart LR
-    subgraph Bootstrap
-        A["locateServicesFolder"]
-        B["registerServices"]
-        C["Knit.Start"]
-        D["loadDevTools"]
-    end
-
-    A --> B --> C --> D
-```
-
 ---
 
 
