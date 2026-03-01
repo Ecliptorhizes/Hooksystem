@@ -67,7 +67,7 @@ local function getDevServerUrl()
 	return (ok and cfg and cfg.DevTuningServerUrl) or "http://localhost:34873"
 end
 local DEV_SERVER_URL = getDevServerUrl()
-local LIVE_POST_INTERVAL = 0.1
+local LIVE_POST_INTERVAL = 0.5
 
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
@@ -113,7 +113,7 @@ local function readAndPostLive()
 		if not noBridgeWarned and RunService:IsRunning() and (tick() - loadTime) > 5 then
 			noBridgeWarned = true
 			-- Plugin cannot see running game's ReplicatedStorage; live data comes from DevTuningServer POSTing directly
-			warn("[DevTuningBridge] Plugin cannot see running game. Live data flows from DevTuningServer -> Node. Ensure npm run tuning and Rojo sync.")
+			warn("[DevTuningBridge] Plugin cannot see running game. Live data flows from DevTuningServer -> Node. Ensure npm start and Rojo sync.")
 			pcall(function()
 				HttpService:RequestAsync({
 					Url = (DEV_SERVER_URL:gsub("/$", "")) .. "/api/debug",
@@ -181,7 +181,7 @@ task.defer(function()
 		lastStatusText = "Server: connected\nBridge: waiting\n(Press Play to start)"
 		print("[DevTuningBridge] Plugin ready. Dev server: " .. DEV_SERVER_URL)
 	else
-		lastStatusText = "Server: not reachable\nRun: npm run tuning"
-		warn("[DevTuningBridge] Cannot reach dev server. Run: npm run tuning")
+		lastStatusText = "Server: not reachable\nRun: npm start"
+		warn("[DevTuningBridge] Cannot reach dev server. Run: npm start")
 	end
 end)

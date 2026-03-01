@@ -27,6 +27,9 @@ try {
 
 const MESSAGING_TOPIC = "HooksystemTuning";
 let messagingDisabled = false;
+let lastMessagingPublish = 0;
+const MESSAGING_MIN_INTERVAL_MS = 3000;
+let messagingPending = false;
 // #region agent log
 const DEBUG_INGEST = "http://127.0.0.1:7370/ingest/3d0ecf27-f5dc-4258-87ce-54cd9abc4adb";
 function agentLog(location, message, data, hypothesisId) {
@@ -37,14 +40,30 @@ function agentLog(location, message, data, hypothesisId) {
 // #endregion
 
 function publishToMessagingService(message) {
-  // #region agent log
-  if (messagingDisabled || !config.openCloudApiKey || !config.universeId) {
-    if (messagingDisabled) agentLog("server.js:publishToMessagingService", "publish_skipped_disabled", {}, "H1");
-    else agentLog("server.js:publishToMessagingService", "publish_skipped_missing_config", { hasKey: !!config.openCloudApiKey, hasUniverseId: !!config.universeId }, "H1");
+  if (messagingDisabled || !config.openCloudApiKey || !config.universeId) return;
+
+  const now = Date.now();
+  const elapsed = now - lastMessagingPublish;
+  if (elapsed < MESSAGING_MIN_INTERVAL_MS) {
+    messagingPending = true;
+    if (!messagingPendingTimer) {
+      messagingPendingTimer = setTimeout(() => {
+        messagingPendingTimer = null;
+        messagingPending = false;
+        doPublishToMessagingService(configOverrides);
+      }, MESSAGING_MIN_INTERVAL_MS - elapsed);
+    }
     return;
   }
-  agentLog("server.js:publishToMessagingService", "publish_attempt", { universeId: config.universeId, topic: MESSAGING_TOPIC }, "H1");
-  // #endregion
+  doPublishToMessagingService(message);
+}
+
+let messagingPendingTimer = null;
+
+function doPublishToMessagingService(message) {
+  if (messagingDisabled || !config.openCloudApiKey || !config.universeId) return;
+  lastMessagingPublish = Date.now();
+
   const body = JSON.stringify({ message: typeof message === "string" ? message : JSON.stringify(message) });
   if (body.length > 1024) return;
   const req = https.request({
@@ -61,18 +80,26 @@ function publishToMessagingService(message) {
     res.on("data", (c) => { data += c; });
     res.on("end", () => {
       if (res.statusCode !== 200) {
-        agentLog("server.js:publishToMessagingService", "publish_failed", { statusCode: res.statusCode, body: data.slice(0, 200) }, "H1");
         if (res.statusCode === 403) {
           messagingDisabled = true;
           console.warn("[Hooksystem] MessagingService disabled (403). Sliders still work via Rojo sync + HTTP.");
           if (data.includes("cannot manage universe")) {
             console.warn("[Hooksystem] To fix: Creator Dashboard → Open Cloud → API Keys → Edit key → Restrict by Experience → select your game.");
           }
+        } else if (res.statusCode === 429) {
+          messagingDisabled = true;
+          let retrySec = 25;
+          try {
+            const parsed = JSON.parse(data);
+            const details = parsed.ErrorDetails || [];
+            const retryInfo = details.find(d => d.ErrorDetailType === "RetryInfo");
+            if (retryInfo && retryInfo.RetryIntervalInSecond) retrySec = retryInfo.RetryIntervalInSecond;
+          } catch (_) {}
+          console.warn("[Hooksystem] MessagingService rate limited (429). Pausing for", retrySec, "seconds. Sliders still work via Rojo sync + HTTP.");
+          setTimeout(() => { messagingDisabled = false; }, retrySec * 1000);
         } else {
-          console.warn("[Hooksystem] MessagingService publish failed:", res.statusCode, data);
+          console.warn("[Hooksystem] MessagingService publish failed:", res.statusCode, data.slice(0, 150));
         }
-      } else {
-        agentLog("server.js:publishToMessagingService", "publish_ok", { statusCode: res.statusCode }, "H1");
       }
     });
     // #endregion
@@ -144,6 +171,14 @@ const apiRouter = express.Router();
 
 apiRouter.get("/config", (req, res) => {
   res.json(configOverrides);
+});
+
+apiRouter.get("/config/merged", (req, res) => {
+  const merged = {};
+  for (const [key, meta] of Object.entries(CONFIG_SCHEMA)) {
+    merged[key] = configOverrides[key] !== undefined ? configOverrides[key] : meta.default;
+  }
+  res.json(merged);
 });
 
 apiRouter.post("/config", (req, res) => {

@@ -27,7 +27,7 @@ See `INSTALL_MANUAL.md` for detailed steps.
 
 ## Usage
 
-1. Run `npm run tuning` (Node server)
+1. Run `npm start` (Node server)
 2. Connect Studio to Rojo (localhost:34872)
 3. Open http://localhost:34873 in your browser
 4. Press **Play** in Studio

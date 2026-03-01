@@ -1,1 +1,1 @@
-{"PullForceSingle":94,"ReelInPullForce":100,"SwingForce":0}
+{}

@@ -24,23 +24,8 @@ local function getDevServerUrl()
 	return HookConfig.DevTuningServerUrl or "http://localhost:34873"
 end
 local DEV_SERVER_URL = getDevServerUrl()
-local POLL_INTERVAL = 0.1
+local POLL_INTERVAL = 2
 local LIVE_WRITE_INTERVAL = 0.1
-
-local function debugLog(msg, data)
-	pcall(function()
-		HttpService:RequestAsync({
-			Url = DEV_SERVER_URL .. "/api/debug",
-			Method = "POST",
-			Headers = { ["Content-Type"] = "application/json" },
-			Body = HttpService:JSONEncode({
-				message = msg,
-				data = data or {},
-				hypothesisId = "H1",
-			}),
-		})
-	end)
-end
 
 local function ensureBridge()
 	local bridge = ReplicatedStorage:FindFirstChild("DevTuningBridge")
@@ -61,7 +46,6 @@ end
 
 local liveVal = ensureBridge()
 print("[DevTuningServer] Bridge created. Install DevTuningBridge plugin for live feed.")
-debugLog("DevTuningServer_started", { url = DEV_SERVER_URL })
 
 local function applyOverrides(overrides)
 	if not overrides or type(overrides) ~= "table" then return 0 end
@@ -85,8 +69,7 @@ task.spawn(function()
 					overrides = HttpService:JSONDecode(data)
 				end)
 				if overrides and type(overrides) == "table" then
-					local count = applyOverrides(overrides)
-					debugLog("messaging_config", { appliedCount = count })
+					applyOverrides(overrides)
 				end
 			end
 		end)
@@ -124,7 +107,6 @@ local function getOverridesFromHttp()
 end
 
 task.spawn(function()
-	local lastDebugLog = 0
 	while true do
 		local overrides = nil
 		local source = "none"
@@ -139,22 +121,14 @@ task.spawn(function()
 			overrides = getOverridesFromSync()
 			source = overrides and "sync" or "none"
 		end
-		local count = applyOverrides(overrides)
-		if tick() - lastDebugLog > 2 then
-			lastDebugLog = tick()
-			debugLog("config_poll", {
-				isRunning = RunService:IsRunning(),
-				source = source,
-				appliedCount = count,
-			})
-		end
+		applyOverrides(overrides)
 		task.wait(POLL_INTERVAL)
 	end
 end)
 
 local lastWriteTime = 0
 local lastPostTime = 0
-local LIVE_POST_INTERVAL = 0.15
+local LIVE_POST_INTERVAL = 0.5
 local function buildLivePayload(player, hrp, hookData)
 	local vel = hrp.AssemblyLinearVelocity
 	local pos = hrp.Position
@@ -176,10 +150,17 @@ local function buildLivePayload(player, hrp, hookData)
 		hasRight = hookData.hasRight,
 		leftRopeLen = hookData.leftRopeLen,
 		rightRopeLen = hookData.rightRopeLen,
+		distToAnchor = hookData.distToAnchor,
+		toTargetX = hookData.toTargetX,
+		toTargetY = hookData.toTargetY,
+		toTargetZ = hookData.toTargetZ,
+		pullForce = hookData.pullForce,
+		grappleSpeed = hookData.grappleSpeed,
+		pendulumMomentum = hookData.pendulumMomentum,
+		gravityScale = hookData.gravityScale,
 	}
 end
 
-local heartbeatSkipLogTime = 0
 RunService.Heartbeat:Connect(function()
 	local now = tick()
 	if now - lastWriteTime < LIVE_WRITE_INTERVAL then
@@ -188,10 +169,6 @@ RunService.Heartbeat:Connect(function()
 	lastWriteTime = now
 	local player = Players:GetPlayers()[1]
 	if not player or not player.Character then
-		if now - heartbeatSkipLogTime > 3 then
-			heartbeatSkipLogTime = now
-			debugLog("live_skip_no_player", { hasPlayer = player ~= nil, hasChar = player and player.Character ~= nil })
-		end
 		return
 	end
 	local hrp = player.Character:FindFirstChild("HumanoidRootPart")
@@ -204,7 +181,7 @@ RunService.Heartbeat:Connect(function()
 	liveVal.Value = json
 	if now - lastPostTime >= LIVE_POST_INTERVAL then
 		lastPostTime = now
-		local ok, err = pcall(function()
+		pcall(function()
 			HttpService:RequestAsync({
 				Url = DEV_SERVER_URL .. "/api/live",
 				Method = "POST",
@@ -212,7 +189,6 @@ RunService.Heartbeat:Connect(function()
 				Body = json,
 			})
 		end)
-		debugLog("live_post", { ok = ok, err = tostring(err), vel = payload.velocityMagnitude })
 	end
 end)
 

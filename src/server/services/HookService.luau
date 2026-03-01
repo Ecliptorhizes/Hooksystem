@@ -1097,6 +1097,8 @@ function HookService:GetDebugData(player: Player): { [string]: any }
 	local state = playerHooks[player.UserId]
 	local gas = getGas(player)
 	local leftLen, rightLen = nil, nil
+	local distToAnchor, toTargetX, toTargetY, toTargetZ = nil, nil, nil, nil
+	local pullForce, grappleSpeed, pendulumMomentum, gravityScale = nil, nil, nil, nil
 	if state then
 		if state.left and state.left.Constraint then
 			leftLen = state.left.Constraint:IsA("SpringConstraint") and state.left.Constraint.FreeLength
@@ -1107,14 +1109,48 @@ function HookService:GetDebugData(player: Player): { [string]: any }
 				or (state.right.Constraint :: RopeConstraint).Length
 		end
 	end
+	local function isHookActive(data)
+		return data and data.Constraint and data.Constraint.Parent ~= nil
+	end
+	local hasLeft = state and isHookActive(state.left)
+	local hasRight = state and isHookActive(state.right)
+	if (hasLeft or hasRight) and player.Character then
+		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") then
+			local pos = hrp.Position
+			local goalPos
+			if hasLeft and hasRight then
+				goalPos = (state.left.TargetAtt.WorldPosition + state.right.TargetAtt.WorldPosition) / 2
+			elseif hasLeft then
+				goalPos = state.left.TargetAtt.WorldPosition
+			else
+				goalPos = state.right.TargetAtt.WorldPosition
+			end
+			local toTarget = (goalPos - pos).Unit
+			distToAnchor = (goalPos - pos).Magnitude
+			toTargetX, toTargetY, toTargetZ = toTarget.X, toTarget.Y, toTarget.Z
+			pullForce = (hasLeft and hasRight) and (HookConfig.PullForceDual or 10) or (HookConfig.PullForceSingle or 20)
+			grappleSpeed = (hasLeft and hasRight) and (HookConfig.GrappleSpeedDual or 300) or (HookConfig.GrappleSpeedSingle or 150)
+			pendulumMomentum = HookConfig.PendulumMomentum or 0.6
+			gravityScale = HookConfig.GravityScaleWhenHooked or 0.5
+		end
+	end
 	return {
 		gas = gas,
 		reelForce = playerReelForce[player.UserId] or 0,
 		swingForce = playerSwingForce[player.UserId] or 0,
-		hasLeft = state and state.left ~= nil,
-		hasRight = state and state.right ~= nil,
+		hasLeft = hasLeft,
+		hasRight = hasRight,
 		leftRopeLen = leftLen,
 		rightRopeLen = rightLen,
+		distToAnchor = distToAnchor,
+		toTargetX = toTargetX,
+		toTargetY = toTargetY,
+		toTargetZ = toTargetZ,
+		pullForce = pullForce,
+		grappleSpeed = grappleSpeed,
+		pendulumMomentum = pendulumMomentum,
+		gravityScale = gravityScale,
 	}
 end
 

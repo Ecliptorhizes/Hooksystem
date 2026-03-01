@@ -82,7 +82,7 @@
       display: inline-block;
       max-width: 800px;
     }
-    .desmos-container {
+    .chart-container {
       background: #fff;
       border-radius: 8px;
       overflow: hidden;
@@ -90,8 +90,9 @@
       height: 320px;
       min-height: 200px;
       min-width: 280px;
+      position: relative;
     }
-    .desmos-container .dcg-container { border-radius: 8px; }
+    .chart-container canvas { display: block; }
     .resize-handle {
       position: absolute;
       right: 0;
@@ -105,14 +106,47 @@
       border-radius: 6px 0 6px 0;
     }
     .resize-handle:hover { background: #2563eb; }
+    .equations-box {
+      background: #0f172a;
+      border-radius: 8px;
+      padding: 12px;
+      font-family: 'Roboto Mono', 'Consolas', monospace;
+      font-size: 0.75rem;
+      line-height: 1.6;
+      color: #94a3b8;
+    }
+    .equations-box .eq { color: #7dd3fc; margin: 6px 0; font-family: 'Cambria Math', 'Latin Modern Math', 'STIX Two Math', serif; }
+    .equations-box .eq-name { color: #64748b; font-size: 0.65rem; }
+    .equations-box .eq-value { color: #fbbf24; }
+    .graph-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 0.8rem;
+    }
+    .graph-controls label { margin-right: 4px; }
+    .graph-controls select { padding: 4px 8px; border-radius: 4px; background: #0f172a; color: #eee; border: 1px solid #334155; }
+    .graph-controls .series-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .graph-controls .series-row input[type="range"] { width: 0; height: 0; opacity: 0; }
+    .graph-controls .series-row input[type="range"] + label { cursor: pointer; }
+    .graph-controls input[type="color"] { width: 24px; height: 20px; padding: 0; border: 1px solid #334155; border-radius: 4px; cursor: pointer; }
+    .graph-controls .series-row input[type="checkbox"] { margin: 0; }
   </style>
-  <script src="https://www.desmos.com/api/v1.8/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0fda6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 </head>
 <body>
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
     <h1 style="margin:0;font-size:1.1rem;">Hooksystem Live Tuning</h1>
     <span class="status" id="status">Waiting for game...</span>
-    <button class="secondary" onclick="simulateConnection()" style="padding:4px 8px;font-size:0.7rem;" title="Simulate connection to verify UI works">Test</button>
+    <button class="secondary" onclick="simulateConnection()" style="padding:4px 8px;font-size:0.7rem;" title="Simulate spring curve (80 samples over 3s)">Test</button>
   </div>
   <div id="noConnectionHelp" style="display:none;background:rgba(148,163,184,0.15);border:1px solid rgba(148,163,184,0.3);border-radius:6px;padding:10px;margin-bottom:12px;font-size:0.75rem;color:#94a3b8;">
     <strong>Live feed</strong> — Install DevTuningBridge plugin (Plugins → Plugins Folder, copy DevTuningBridge.rbxm). Sliders work via Rojo sync.
@@ -132,6 +166,18 @@
 
     <div class="right-panel">
       <div class="section" style="margin-bottom:8px;">
+        <h2 style="font-size:0.8rem;margin:0 0 4px 0;">Physics Equations</h2>
+        <div class="equations-box" id="physicsEquations">
+          <div class="eq-name">Loading config...</div>
+        </div>
+      </div>
+      <div class="section" style="margin-bottom:8px;">
+        <h2 style="font-size:0.8rem;margin:0 0 4px 0;">Raw Live Data</h2>
+        <div id="rawLiveData" style="background:#fff;color:#1e293b;border-radius:8px;padding:12px;font-size:0.7rem;max-height:140px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:monospace;border:1px solid #e2e8f0;">
+          No data yet. Press Play in Studio and move around, or click Test to simulate a spring curve.
+        </div>
+      </div>
+      <div class="section" style="margin-bottom:8px;">
         <h2 style="font-size:0.8rem;margin:0 0 4px 0;">Live Values</h2>
         <div class="live-box" id="liveValuesRight" style="padding:8px;font-size:0.75rem;">
           <div class="row">Velocity: <span id="liveVelocityR">0</span> stud/s</div>
@@ -143,17 +189,33 @@
         </div>
       </div>
       <div class="section" style="margin-bottom:8px;">
-        <h2 style="font-size:0.8rem;margin:0 0 4px 0;">2D Position (X, Z)</h2>
+        <h2 style="font-size:0.8rem;margin:0 0 4px 0;">Velocity (hooking math)</h2>
+        <div class="graph-controls" id="graphControls">
+          <div class="series-row">
+            <label>Velocity</label>
+            <input type="color" id="colorVelocity" value="#3b82f6" onchange="applyGraphColors()">
+            <label><input type="checkbox" id="showVelocity" checked onchange="applyGraphVisibility()"> Show</label>
+            <label>Launch cap</label>
+            <input type="color" id="colorCap" value="#ef4444" onchange="applyGraphColors()">
+            <label><input type="checkbox" id="showCap" checked onchange="applyGraphVisibility()"> Show</label>
+            <label>Single</label>
+            <input type="color" id="colorSingle" value="#f97316" onchange="applyGraphColors()">
+            <label><input type="checkbox" id="showSingle" checked onchange="applyGraphVisibility()"> Show</label>
+            <label>Dual</label>
+            <input type="color" id="colorDual" value="#22c55e" onchange="applyGraphColors()">
+            <label><input type="checkbox" id="showDual" checked onchange="applyGraphVisibility()"> Show</label>
+          </div>
+          <button class="secondary" onclick="clearGraph()" style="padding:2px 8px;font-size:0.75rem;">Clear</button>
+          <span style="color:#94a3b8;font-size:0.7rem;">Scroll to zoom · Drag to pan</span>
+        </div>
         <div class="graph-wrapper" id="graphWrapper">
-          <div class="desmos-container" id="desmosContainer">
-            <div id="calculator"></div>
+          <div class="chart-container" id="chartContainer" style="width:500px;height:360px;">
+            <canvas id="velocityChart"></canvas>
           </div>
           <div class="resize-handle" id="resizeHandle" title="Drag to resize graph"></div>
         </div>
         <div class="row" style="margin-top:4px;font-size:0.7rem;">
-          <span>X / Z</span>
           <span style="color:#94a3b8;">Drag blue corner to resize</span>
-          <button class="secondary" onclick="clearTrajectory()" style="padding:2px 6px;font-size:0.65rem;">Clear</button>
         </div>
       </div>
     </div>
@@ -162,9 +224,23 @@
   <script>
     const API = '/api';
     const MAX_POINTS = 300;
-    const trajectory = [];
-    let calculator = null;
+    const WS_STALE_MS = 3000;
+    const velocityTimeSeries = [];
+    let velocityChart = null;
+    let sampleIndex = 0;
+    let lastChartUpdate = 0;
+    const CHART_UPDATE_THROTTLE_MS = 150;
+    const TIME_WINDOW = 120;
     let ws = null;
+    let lastMessageTime = 0;
+    let staleCheckHandle = null;
+
+    function clearStaleCheck() {
+      if (staleCheckHandle) {
+        clearInterval(staleCheckHandle);
+        staleCheckHandle = null;
+      }
+    }
 
     async function connectWebSocket() {
       try {
@@ -175,21 +251,33 @@
         ws.onopen = () => {
           document.getElementById('status').textContent = 'Connected';
           document.getElementById('status').className = 'status connected';
-          if (pollHandle) clearInterval(pollHandle);
+          lastMessageTime = Date.now();
+          if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
+          clearStaleCheck();
+          staleCheckHandle = setInterval(() => {
+            if (ws && ws.readyState === 1 && (Date.now() - lastMessageTime) > WS_STALE_MS) {
+              ws.close();
+            }
+          }, 1000);
         };
         ws.onclose = () => {
+          clearStaleCheck();
           document.getElementById('status').textContent = 'Disconnected';
           document.getElementById('status').className = 'status';
           startPollFallback();
-          setTimeout(connectWebSocket, 3000);
+          setTimeout(connectWebSocket, 2000);
         };
         ws.onerror = () => { startPollFallback(); };
         ws.onmessage = (e) => {
-          const msg = JSON.parse(e.data);
-          if (msg.live) updateLiveFromData(msg.live);
+          lastMessageTime = Date.now();
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.live) updateLiveFromData(msg.live);
+          } catch (_) {}
         };
       } catch (err) {
         startPollFallback();
+        setTimeout(connectWebSocket, 3000);
       }
     }
     let pollHandle = null;
@@ -201,31 +289,92 @@
           const data = await r.json();
           updateLiveFromData(data);
         } catch (_) {}
-      }, 200);
+      }, 80);
     }
 
     function initChart() {
-      const elt = document.getElementById('calculator');
-      if (!window.Desmos) return;
-      calculator = Desmos.GraphingCalculator(elt, {
-        keypad: false,
-        expressions: false,
-        settingsMenu: false,
-        zoomButtons: true,
-        showGrid: true,
-        xAxisLabel: 'X',
-        yAxisLabel: 'Z'
+      if (!window.Chart) return;
+      const ctx = document.getElementById('velocityChart').getContext('2d');
+      const cfg = getCurrentConfig();
+      const cap = cfg.LaunchVelocityCap ?? 120;
+      const single = cfg.GrappleSpeedSingle ?? 150;
+      const dual = cfg.GrappleSpeedDual ?? 300;
+      velocityChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [
+            { id: 'velocity', label: 'Velocity', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.2)', fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 4 },
+            { id: 'cap', label: 'Launch cap', data: [{ x: 0, y: cap }, { x: 120, y: cap }], borderColor: '#ef4444', borderDash: [5,5], pointRadius: 0, tension: 0 },
+            { id: 'single', label: 'Single', data: [{ x: 0, y: single }, { x: 120, y: single }], borderColor: '#f97316', borderDash: [2,2], pointRadius: 0, tension: 0 },
+            { id: 'dual', label: 'Dual', data: [{ x: 0, y: dual }, { x: 120, y: dual }], borderColor: '#22c55e', borderDash: [2,2], pointRadius: 0, tension: 0 }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { intersect: false, mode: 'index' },
+          plugins: {
+            legend: { display: true, position: 'top' },
+            zoom: {
+              zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'xy' },
+              pan: { enabled: true, mode: 'xy' },
+              limits: { x: { min: 0, max: 2000 }, y: { min: 0, max: 400 } }
+            }
+          },
+          scales: {
+            x: {
+              type: 'linear',
+              title: { display: true, text: 'Time (samples)' },
+              min: 0,
+              max: TIME_WINDOW,
+              ticks: { stepSize: 10, maxTicksLimit: 12 },
+              grid: { display: true, color: '#e2e8f0' }
+            },
+            y: {
+              type: 'linear',
+              title: { display: true, text: 'Velocity (stud/s)' },
+              min: 0,
+              max: 350,
+              ticks: { stepSize: 50, maxTicksLimit: 8 },
+              grid: { display: true, color: '#e2e8f0' }
+            }
+          },
+          animation: false,
+          transitions: false
+        }
       });
-      calculator.setExpression({ id: 'trajectory', type: 'table', columns: [
-        { id: 'x', latex: 'x', values: [], dragMode: Desmos.DragModes.NONE },
-        { id: 'z', latex: 'z', values: [], dragMode: Desmos.DragModes.NONE, points: true, lines: true }
-      ]});
       initResize();
+      fetchConfigMerged().then(c => { updateRefLines(c); refreshPhysicsEquations(c); });
+    }
+
+    function applyGraphColors() {
+      if (!velocityChart) return;
+      const velColor = document.getElementById('colorVelocity')?.value ?? '#3b82f6';
+      const capColor = document.getElementById('colorCap')?.value ?? '#ef4444';
+      const singleColor = document.getElementById('colorSingle')?.value ?? '#f97316';
+      const dualColor = document.getElementById('colorDual')?.value ?? '#22c55e';
+      velocityChart.data.datasets[0].borderColor = velColor;
+      velocityChart.data.datasets[0].backgroundColor = velColor.startsWith('#') ? velColor + '33' : 'rgba(59,130,246,0.2)';
+      velocityChart.data.datasets[1].borderColor = capColor;
+      velocityChart.data.datasets[2].borderColor = singleColor;
+      velocityChart.data.datasets[3].borderColor = dualColor;
+      velocityChart.update('none');
+    }
+
+    function applyGraphVisibility() {
+      if (!velocityChart) return;
+      const show = (i, v) => { velocityChart.data.datasets[i].hidden = !v; };
+      show(0, document.getElementById('showVelocity')?.checked ?? true);
+      show(1, document.getElementById('showCap')?.checked ?? true);
+      show(2, document.getElementById('showSingle')?.checked ?? true);
+      show(3, document.getElementById('showDual')?.checked ?? true);
+      velocityChart.update('none');
     }
 
     function initResize() {
       const handle = document.getElementById('resizeHandle');
-      const container = document.getElementById('desmosContainer');
+      const container = document.getElementById('chartContainer');
       if (!handle || !container) return;
       handle.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -236,7 +385,7 @@
           const h = Math.max(200, Math.min(600, startH + e2.clientY - startY));
           container.style.width = w + 'px';
           container.style.height = h + 'px';
-          if (calculator && calculator.resize) calculator.resize();
+          if (velocityChart) velocityChart.resize();
         };
         const onUp = () => {
           document.removeEventListener('mousemove', onMove);
@@ -247,31 +396,48 @@
       });
     }
 
-    function clearTrajectory() {
-      trajectory.length = 0;
-      if (calculator) {
-        calculator.setExpression({ id: 'trajectory', type: 'table', columns: [
-          { id: 'x', latex: 'x', values: [], dragMode: Desmos.DragModes.NONE },
-          { id: 'z', latex: 'z', values: [], dragMode: Desmos.DragModes.NONE, points: true, lines: true }
-        ]});
+    function clearGraph() {
+      velocityTimeSeries.length = 0;
+      sampleIndex = 0;
+      if (velocityChart) {
+        velocityChart.data.labels = [];
+        velocityChart.data.datasets[0].data = [];
+        applyWindowToChart();
+        updateRefLines(getCurrentConfig());
+        velocityChart.update('none');
       }
     }
 
-    function pushToChart(data) {
-      if (!calculator) return;
-      const x = data.posX;
-      const z = data.posZ;
-      if (x == null || z == null) return;
+    function getWindowBounds() {
+      const xMin = Math.max(0, sampleIndex - TIME_WINDOW);
+      const xMax = Math.max(TIME_WINDOW, sampleIndex + 5);
+      return { xMin, xMax };
+    }
 
-      trajectory.push({ x, z });
-      if (trajectory.length > MAX_POINTS) trajectory.shift();
+    function applyWindowToChart() {
+      if (!velocityChart) return;
+      const { xMin, xMax } = getWindowBounds();
+      velocityChart.options.scales.x.min = xMin;
+      velocityChart.options.scales.x.max = xMax;
+    }
 
-      const xVals = trajectory.map(p => String(p.x));
-      const zVals = trajectory.map(p => String(p.z));
-      calculator.setExpression({ id: 'trajectory', type: 'table', columns: [
-        { id: 'x', latex: 'x', values: xVals, dragMode: Desmos.DragModes.NONE },
-        { id: 'z', latex: 'z', values: zVals, dragMode: Desmos.DragModes.NONE, points: true, lines: true }
-      ]});
+    function pushToVelocityChart(data) {
+      if (!velocityChart) return;
+      const v = data.velocityMagnitude ?? data.velocity ?? 0;
+      if (typeof v !== 'number') return;
+
+      velocityTimeSeries.push({ t: sampleIndex, v });
+      sampleIndex += 1;
+      if (velocityTimeSeries.length > MAX_POINTS) velocityTimeSeries.shift();
+
+      const now = Date.now();
+      if (now - lastChartUpdate < CHART_UPDATE_THROTTLE_MS) return;
+      lastChartUpdate = now;
+
+      velocityChart.data.datasets[0].data = velocityTimeSeries.map(p => ({ x: p.t, y: p.v }));
+      applyWindowToChart();
+      updateRefLines(getCurrentConfig());
+      velocityChart.update('none');
     }
 
     async function fetchSchema() {
@@ -284,6 +450,67 @@
       return r.json();
     }
 
+    async function fetchConfigMerged() {
+      const r = await fetch(`${API}/config/merged`);
+      return r.json();
+    }
+
+    let lastMergedConfig = {};
+    let lastLiveData = null;
+    function refreshPhysicsEquations(cfg, live) {
+      if (live) lastLiveData = live;
+      const el = document.getElementById('physicsEquations');
+      if (!el) return;
+      const c = cfg || lastMergedConfig;
+      if (cfg) lastMergedConfig = c;
+      const liveData = live ?? lastLiveData;
+      const v = (k, d) => (c[k] != null ? c[k] : d);
+      const L = (x) => (x != null && typeof x === 'number' ? x.toFixed(2) : '—');
+      const hooked = liveData?.isHooked ?? false;
+      const vel = liveData?.velocity ?? liveData?.velocityMagnitude ?? 0;
+      const d = liveData?.distToAnchor;
+      const tx = liveData?.toTargetX, ty = liveData?.toTargetY, tz = liveData?.toTargetZ;
+      const F = liveData?.pullForce ?? (hooked ? v('PullForceSingle', 20) : null);
+      const vT = liveData?.grappleSpeed ?? (hooked ? v('GrappleSpeedSingle', 150) : null);
+      const mu = liveData?.pendulumMomentum ?? v('PendulumMomentum', 0.6);
+      const gs = liveData?.gravityScale ?? v('GravityScaleWhenHooked', 0.5);
+      const toTargetStr = (tx != null && ty != null && tz != null)
+        ? `(${tx.toFixed(2)}, ${ty.toFixed(2)}, ${tz.toFixed(2)})`
+        : '—';
+      el.innerHTML = `
+        <div class="eq-name">Velocity magnitude</div>
+        <div class="eq">|v| = <span class="eq-value">${L(vel)}</span> stud/s</div>
+        <div class="eq-name">Distance to anchor</div>
+        <div class="eq">d = ‖p − a‖ = <span class="eq-value">${hooked ? L(d) : '—'}</span> stud</div>
+        <div class="eq-name">Direction to anchor (unit vector)</div>
+        <div class="eq">ê = (a − p) / ‖a − p‖ = <span class="eq-value">${hooked ? toTargetStr : '—'}</span></div>
+        <div class="eq-name">Pull force (current)</div>
+        <div class="eq">F_pull = F · ê  &nbsp;  F = <span class="eq-value">${hooked ? L(F) : '—'}</span></div>
+        <div class="eq-name">Target grapple speed</div>
+        <div class="eq">v_target = <span class="eq-value">${hooked ? L(vT) : '—'}</span> stud/s</div>
+        <div class="eq-name">Pendulum momentum blend</div>
+        <div class="eq">v_new = ${L(mu)}·v_old + (1 − ${L(mu)})·v_pull</div>
+        <div class="eq-name">Gravity (when hooked)</div>
+        <div class="eq">g_eff = g × <span class="eq-value">${L(gs)}</span></div>
+        <div class="eq-name">Launch cap</div>
+        <div class="eq">|v| ≤ ${v('LaunchVelocityCap', 120)} stud/s</div>
+      `;
+    }
+
+    function updateRefLines(cfg) {
+      if (!velocityChart) return;
+      const c = cfg || {};
+      const cap = c.LaunchVelocityCap ?? 120;
+      const single = c.GrappleSpeedSingle ?? 150;
+      const dual = c.GrappleSpeedDual ?? 300;
+      const { xMin, xMax } = getWindowBounds();
+      const span = (y) => [{ x: xMin, y }, { x: xMax, y }];
+      velocityChart.data.datasets[1].data = span(cap);
+      velocityChart.data.datasets[2].data = span(single);
+      velocityChart.data.datasets[3].data = span(dual);
+      velocityChart.update('none');
+    }
+
     async function postConfig(body) {
       await fetch(`${API}/config`, {
         method: 'POST',
@@ -293,16 +520,51 @@
     }
 
     async function simulateConnection() {
-      await fetch(`${API}/live`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ velocityMagnitude: 50, posX: 100, posZ: 200, isHooked: false }),
-      });
+      const samples = 80;
+      const dt = 0.05;
+      for (let i = 0; i < samples; i++) {
+        const t = i * dt;
+        const v = 80 * Math.exp(-0.3 * t) * Math.cos(2 * t) + 40;
+        const x = 100 + 50 * Math.sin(t * 1.5);
+        const z = 200 + 30 * Math.cos(t * 1.2);
+        const hooked = t < 2;
+        await fetch(`${API}/live`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            velocityMagnitude: Math.max(0, v),
+            velocity: Math.max(0, v),
+            posX: x,
+            posZ: z,
+            posY: 10,
+            isHooked: hooked,
+            distToAnchor: hooked ? 80 - t * 15 : null,
+            toTargetX: hooked ? 0.7 : null,
+            toTargetY: hooked ? 0.1 : null,
+            toTargetZ: hooked ? -0.7 : null,
+            pullForce: hooked ? 20 : null,
+            grappleSpeed: hooked ? 150 : null,
+            pendulumMomentum: 0.6,
+            gravityScale: 0.5,
+          }),
+        });
+        await new Promise(r => setTimeout(r, 40));
+      }
     }
 
     function updateLiveFromData(data) {
       document.getElementById('noConnectionHelp').style.display = 'block';
-      if (data.lastUpdate) pushToChart(data);
+      const rawEl = document.getElementById('rawLiveData');
+      if (rawEl) {
+        const copy = { ...data };
+        delete copy.lastUpdate;
+        rawEl.textContent = JSON.stringify(copy, null, 2);
+        rawEl.style.color = '#94a3b8';
+      }
+      refreshPhysicsEquations(undefined, data);
+      if (data.velocityMagnitude != null || data.velocity != null) {
+        pushToVelocityChart(data);
+      }
       const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
       set('liveVelocityR', (data.velocityMagnitude ?? data.velocity ?? 0).toFixed(1));
       set('liveHookedR', data.isHooked ?? 'false');
@@ -317,13 +579,30 @@
       set('livePosZ', data.posZ != null ? data.posZ.toFixed(0) : '-');
     }
 
+    function getCurrentConfig() {
+      const cfg = {};
+      document.querySelectorAll('input[data-key]').forEach(inp => {
+        const k = inp.dataset.key;
+        const v = parseFloat(inp.value);
+        if (!isNaN(v)) cfg[k] = v;
+      });
+      return cfg;
+    }
+
+    function onConfigChange() {
+      const cfg = getCurrentConfig();
+      refreshPhysicsEquations(cfg);
+      updateRefLines(cfg);
+    }
+
     function buildSliders() {
-      fetchSchema().then(schema => {
+      Promise.all([fetchSchema(), fetchConfigMerged()]).then(([schema, merged]) => {
         const container = document.getElementById('sliders');
+        refreshPhysicsEquations(merged);
         for (const [key, meta] of Object.entries(schema)) {
+          const val = merged[key] !== undefined ? merged[key] : meta.default;
           const row = document.createElement('div');
           row.className = 'row';
-          const val = meta.default;
           row.innerHTML = `
             <label>${key}</label>
             <input type="range" min="${meta.min}" max="${meta.max}" step="${meta.step}" value="${val}" data-key="${key}">
@@ -340,27 +619,47 @@
             } else {
               postConfig(state);
             }
+            onConfigChange();
           });
           container.appendChild(row);
         }
+        updateRefLines(merged);
       });
     }
 
     async function reset() {
       await fetch(`${API}/reset`, { method: 'POST' });
-      const schema = await fetchSchema();
+      const [schema, merged] = await Promise.all([fetchSchema(), fetchConfigMerged()]);
       for (const [key, meta] of Object.entries(schema)) {
+        const val = merged[key] !== undefined ? merged[key] : meta.default;
         const input = document.querySelector(`input[data-key="${key}"]`);
         if (input) {
-          input.value = meta.default;
-          document.querySelector(`[data-val="${key}"]`).textContent = meta.default;
+          input.value = val;
+          const span = document.querySelector(`[data-val="${key}"]`);
+          if (span) span.textContent = val;
         }
       }
+      onConfigChange();
     }
 
-    initChart();
-    buildSliders();
-    connectWebSocket();
+    function boot() {
+      if (!window.Chart) {
+        setTimeout(boot, 100);
+        return;
+      }
+      initChart();
+      buildSliders();
+      startPollFallback();
+      connectWebSocket();
+      setTimeout(() => {
+        if (velocityChart) velocityChart.resize();
+      }, 200);
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
+    }
   </script>
 </body>
 </html>

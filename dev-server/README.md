@@ -5,13 +5,13 @@ Live tuning dashboard for hook physics. WebSocket + HTTP API for real-time confi
 ## Separation
 
 - **Rojo** = syncs game files (src/) to Studio. Run with `npm run rojo`.
-- **Node** = Hooksystem Live Tuning. Run with `npm run tuning`.
+- **Node** = Hooksystem Live Tuning. Run with `npm start`.
 
 ## Run
 
 ```bash
 # Tuning server only (Node.js)
-npm run tuning
+npm start
 ```
 
 Or run both together:
@@ -61,9 +61,9 @@ If you have an existing `zipshot_config.json`, rename it to `hooksystem_config.j
 | `npm start` (from root) | Rojo + tuning (both) |
 | `npm run dev` | Same as start |
 | `npm run rojo` | Rojo only (port 34872) |
-| `npm run tuning` | Tuning only (HTTP + WebSocket) |
+| `npm start` | Tuning only (HTTP + WebSocket) |
 
-**Using vscode-rojo:** The extension runs Rojo for you. In that case, run `npm run tuning` in a terminal for the dashboard.
+**Using vscode-rojo:** The extension runs Rojo for you. In that case, run `npm start` in a terminal for the dashboard.
 
 ## Usage
 

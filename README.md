@@ -66,6 +66,8 @@ npm start
 
 Rojo handles file sync; the Node server handles live tuning. Both can run together via `npm start`.
 
+**Velocity graph:** The tuning dashboard uses Chart.js to plot velocity over time during hooking, with smooth curves and zoom/pan.
+
 ---
 
 ## Tech Stack
