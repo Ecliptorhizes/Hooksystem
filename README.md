@@ -6,7 +6,9 @@ A **Roblox grapple/hook movement system** that lets players shoot grappling hook
 
 ![Gameplay](docs/gameplay.gif)
 
-[Full video](docs/gameplay.mp4)
+[Full video](docs/gameplay.mp4) · [**Play on Roblox**](https://www.roblox.com/games/112544648285770/HookSystem)
+
+**Controls:** **Q** and **E** to fire hooks (left/right), **SPACE** to boost.
 
 ---
 
