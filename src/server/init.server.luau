@@ -4,7 +4,6 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 
--- init.server makes folder a Script; services and DevTuningServer are script's children
 local services = script:FindFirstChild("services")
 	or (script.Parent:FindFirstChild("Server") and script.Parent.Server:FindFirstChild("services"))
 	or ServerScriptService:FindFirstChild("services")
@@ -17,7 +16,6 @@ end
 Knit.AddServices(services)
 Knit.Start():andThen(function()
 	if RunService:IsStudio() then
-		-- init.server makes the folder a Script; DevTuningServer is script's child, not script.Parent's
 		local DevTuningServer = script:FindFirstChild("DevTuningServer")
 		if DevTuningServer then
 			require(DevTuningServer)

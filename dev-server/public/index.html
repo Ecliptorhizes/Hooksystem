@@ -149,7 +149,7 @@
     <button class="secondary" onclick="simulateConnection()" style="padding:4px 8px;font-size:0.7rem;" title="Simulate spring curve (80 samples over 3s)">Test</button>
   </div>
   <div id="noConnectionHelp" style="display:none;background:rgba(148,163,184,0.15);border:1px solid rgba(148,163,184,0.3);border-radius:6px;padding:10px;margin-bottom:12px;font-size:0.75rem;color:#94a3b8;">
-    <strong>Live feed</strong> — Install DevTuningBridge plugin (Plugins → Plugins Folder, copy DevTuningBridge.rbxm). Sliders work via Rojo sync.
+    <strong>Live feed</strong> — Run <code>npm start</code>, then Press Play in Studio. Game POSTs to dev server. Sliders sync via Rojo or MessagingService (API key + universeId in hooksystem_config.json).
   </div>
 
   <div class="layout">
@@ -218,6 +218,14 @@
           <span style="color:#94a3b8;">Drag blue corner to resize</span>
         </div>
       </div>
+      <div class="section" style="margin-bottom:8px;" id="customProbesSection">
+        <h2 style="font-size:0.8rem;margin:0 0 4px 0;">Custom Probes</h2>
+        <p style="font-size:0.7rem;color:#94a3b8;margin:0 0 8px 0;">Use DevTuning.Report() in your scripts to capture timing, animations, and math.</p>
+        <div class="live-box" id="customProbesTable" style="padding:8px;font-size:0.75rem;margin-bottom:12px;">
+          <div id="customProbesTableBody" style="color:#94a3b8;">No custom data yet.</div>
+        </div>
+        <div id="customChartsContainer"></div>
+      </div>
     </div>
   </div>
 
@@ -231,6 +239,11 @@
     let lastChartUpdate = 0;
     const CHART_UPDATE_THROTTLE_MS = 150;
     const TIME_WINDOW = 120;
+    const customTimeSeries = {};
+    const customCharts = {};
+    let customSampleIndex = {};
+    let lastCustomChartUpdate = {};
+    let schemaCache = { config: {}, custom: {} };
     let ws = null;
     let lastMessageTime = 0;
     let staleCheckHandle = null;
@@ -442,7 +455,13 @@
 
     async function fetchSchema() {
       const r = await fetch(`${API}/schema`);
-      return r.json();
+      const data = await r.json();
+      if (data && typeof data.config === 'object' && typeof data.custom === 'object') {
+        schemaCache = { config: data.config, custom: data.custom };
+      } else {
+        schemaCache = { config: data || {}, custom: {} };
+      }
+      return schemaCache;
     }
 
     async function fetchConfig() {
@@ -552,6 +571,84 @@
       }
     }
 
+    function refreshCustomProbes(custom, liveData) {
+      const customSchema = custom ?? schemaCache.custom;
+      const data = liveData ?? {};
+      const body = document.getElementById('customProbesTableBody');
+      if (!body) return;
+      const keys = Object.keys(customSchema);
+      if (keys.length === 0) {
+        const hasCustom = Object.keys(data).some(k => !['velocityMagnitude','velocity','speed','velX','velY','velZ','posX','posY','posZ','isHooked','gas','reelForce','swingForce','hasLeft','hasRight','leftRopeLen','rightRopeLen','distToAnchor','toTargetX','toTargetY','toTargetZ','pullForce','grappleSpeed','pendulumMomentum','gravityScale','lastUpdate'].includes(k));
+        body.textContent = hasCustom ? 'Refreshing...' : 'No custom data yet. Use DevTuning.Report() in your scripts.';
+        return;
+      }
+      body.innerHTML = keys.map(key => {
+        const meta = customSchema[key] || {};
+        const val = data[key];
+        const label = meta.label || key;
+        const unit = meta.unit ? ` ${meta.unit}` : '';
+        const display = val != null ? (typeof val === 'number' ? val.toFixed(3) : String(val)) : '—';
+        return `<div class="row">${label}: <span style="color:#7dd3fc">${display}${unit}</span></div>`;
+      }).join('');
+      ensureCustomCharts(customSchema);
+    }
+
+    function ensureCustomCharts(customSchema) {
+      if (!window.Chart) return;
+      const container = document.getElementById('customChartsContainer');
+      if (!container) return;
+      for (const [key, meta] of Object.entries(customSchema || {})) {
+        if (!meta.chart || customCharts[key]) continue;
+        if (!customTimeSeries[key]) customTimeSeries[key] = [];
+        if (customSampleIndex[key] == null) customSampleIndex[key] = 0;
+        if (lastCustomChartUpdate[key] == null) lastCustomChartUpdate[key] = 0;
+        const wrap = document.createElement('div');
+        wrap.className = 'section';
+        wrap.style.marginBottom = '12px';
+        wrap.innerHTML = `<h3 style="font-size:0.8rem;margin:0 0 4px 0;color:#94a3b8">${meta.label || key}</h3><div class="chart-container" style="width:400px;height:200px"><canvas id="customChart_${key}"></canvas></div>`;
+        container.appendChild(wrap);
+        const ctx = wrap.querySelector('canvas').getContext('2d');
+        const yMax = (meta.max != null && meta.min != null) ? meta.max : (meta.max ?? 100);
+        const yMin = meta.min ?? 0;
+        customCharts[key] = new Chart(ctx, {
+          type: 'line',
+          data: { labels: [], datasets: [{ data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.2)', fill: true, tension: 0.35, pointRadius: 0 }] },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { type: 'linear', min: 0, max: TIME_WINDOW, grid: { color: '#e2e8f0' } },
+              y: { type: 'linear', min: yMin, max: yMax, grid: { color: '#e2e8f0' } }
+            },
+            animation: false,
+            transitions: false
+          }
+        });
+      }
+    }
+
+    function pushToCustomChart(key, value) {
+      if (typeof value !== 'number') return;
+      const chart = customCharts[key];
+      if (!chart) return;
+      if (!customTimeSeries[key]) customTimeSeries[key] = [];
+      const idx = customSampleIndex[key] ?? 0;
+      customSampleIndex[key] = idx + 1;
+      customTimeSeries[key].push({ t: idx, v: value });
+      if (customTimeSeries[key].length > MAX_POINTS) customTimeSeries[key].shift();
+      const now = Date.now();
+      if (now - (lastCustomChartUpdate[key] ?? 0) < CHART_UPDATE_THROTTLE_MS) return;
+      lastCustomChartUpdate[key] = now;
+      chart.data.datasets[0].data = customTimeSeries[key].map(p => ({ x: p.t, y: p.v }));
+      const meta = schemaCache.custom?.[key];
+      const xMin = Math.max(0, (customSampleIndex[key] ?? 0) - TIME_WINDOW);
+      const xMax = Math.max(TIME_WINDOW, (customSampleIndex[key] ?? 0) + 5);
+      chart.options.scales.x.min = xMin;
+      chart.options.scales.x.max = xMax;
+      chart.update('none');
+    }
+
     function updateLiveFromData(data) {
       document.getElementById('noConnectionHelp').style.display = 'block';
       const rawEl = document.getElementById('rawLiveData');
@@ -564,6 +661,13 @@
       refreshPhysicsEquations(undefined, data);
       if (data.velocityMagnitude != null || data.velocity != null) {
         pushToVelocityChart(data);
+      }
+      refreshCustomProbes(undefined, data);
+      const customKeys = Object.keys(schemaCache.custom || {});
+      for (const key of customKeys) {
+        if (data[key] != null && schemaCache.custom[key]?.chart) {
+          pushToCustomChart(key, typeof data[key] === 'number' ? data[key] : parseFloat(data[key]));
+        }
       }
       const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
       set('liveVelocityR', (data.velocityMagnitude ?? data.velocity ?? 0).toFixed(1));
@@ -599,8 +703,29 @@
       Promise.all([fetchSchema(), fetchConfigMerged()]).then(([schema, merged]) => {
         const container = document.getElementById('sliders');
         refreshPhysicsEquations(merged);
-        for (const [key, meta] of Object.entries(schema)) {
-          const val = merged[key] !== undefined ? merged[key] : meta.default;
+        const configSchema = schema.config || schema;
+        const customSchema = schema.custom || {};
+        const sliderSchema = { ...configSchema };
+        for (const [key, meta] of Object.entries(customSchema)) {
+          if (meta && meta.slider && meta.min != null && meta.max != null) {
+            sliderSchema[key] = {
+              min: meta.min,
+              max: meta.max,
+              step: meta.step ?? 1,
+              default: meta.default ?? meta.min,
+            };
+          }
+        }
+        let customHeaderAdded = false;
+        for (const [key, meta] of Object.entries(sliderSchema)) {
+          if (!(key in configSchema) && !customHeaderAdded) {
+            customHeaderAdded = true;
+            const sep = document.createElement('div');
+            sep.style.cssText = 'margin-top:12px;padding-top:8px;border-top:1px solid rgba(148,163,184,0.2);font-size:0.65rem;color:#64748b;';
+            sep.textContent = 'Custom (developer)';
+            container.appendChild(sep);
+          }
+          const val = merged[key] !== undefined ? merged[key] : (meta.default ?? meta.min ?? 0);
           const row = document.createElement('div');
           row.className = 'row';
           row.innerHTML = `
@@ -624,14 +749,23 @@
           container.appendChild(row);
         }
         updateRefLines(merged);
+        refreshCustomProbes();
       });
     }
 
     async function reset() {
       await fetch(`${API}/reset`, { method: 'POST' });
       const [schema, merged] = await Promise.all([fetchSchema(), fetchConfigMerged()]);
-      for (const [key, meta] of Object.entries(schema)) {
-        const val = merged[key] !== undefined ? merged[key] : meta.default;
+      const configSchema = schema.config || schema;
+      const customSchema = schema.custom || {};
+      const sliderSchema = { ...configSchema };
+      for (const [key, meta] of Object.entries(customSchema)) {
+        if (meta && meta.slider && meta.min != null && meta.max != null) {
+          sliderSchema[key] = { min: meta.min, max: meta.max, step: meta.step ?? 1, default: meta.default ?? meta.min };
+        }
+      }
+      for (const [key, meta] of Object.entries(sliderSchema)) {
+        const val = merged[key] !== undefined ? merged[key] : (meta.default ?? meta.min ?? 0);
         const input = document.querySelector(`input[data-key="${key}"]`);
         if (input) {
           input.value = val;
@@ -651,6 +785,15 @@
       buildSliders();
       startPollFallback();
       connectWebSocket();
+      let hasCustomSliders = false;
+      setInterval(() => fetchSchema().then((s) => {
+        refreshCustomProbes();
+        const customSliderKeys = Object.entries(s.custom || {}).filter(([, m]) => m && m.slider).map(([k]) => k);
+        if (customSliderKeys.length > 0 && !hasCustomSliders) {
+          hasCustomSliders = true;
+          buildSliders();
+        }
+      }), 5000);
       setTimeout(() => {
         if (velocityChart) velocityChart.resize();
       }, 200);

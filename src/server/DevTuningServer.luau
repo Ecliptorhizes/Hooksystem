@@ -8,10 +8,11 @@ if not RunService:IsStudio() then
 	return nil
 end
 
-print("[DevTuningServer] Starting (Rojo sync + plugin bridge + MessagingService)...")
+print("[DevTuningServer] Starting (Rojo sync + MessagingService)...")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local HookConfig = require(ReplicatedStorage.Core.Config.HookConfig)
+local DevTuning = require(ReplicatedStorage.Core.DevTuning)
 local HookService = Knit.GetService("HookService")
 
 local function getDevServerUrl()
@@ -27,28 +28,11 @@ local DEV_SERVER_URL = getDevServerUrl()
 local POLL_INTERVAL = 2
 local LIVE_WRITE_INTERVAL = 0.1
 
-local function ensureBridge()
-	local bridge = ReplicatedStorage:FindFirstChild("DevTuningBridge")
-	if not bridge then
-		bridge = Instance.new("Folder")
-		bridge.Name = "DevTuningBridge"
-		bridge.Parent = ReplicatedStorage
-	end
-	local liveVal = bridge:FindFirstChild("LiveData")
-	if not liveVal then
-		liveVal = Instance.new("StringValue")
-		liveVal.Name = "LiveData"
-		liveVal.Value = "{}"
-		liveVal.Parent = bridge
-	end
-	return liveVal
-end
-
-local liveVal = ensureBridge()
-print("[DevTuningServer] Bridge created. Install DevTuningBridge plugin for live feed.")
-
 local function applyOverrides(overrides)
-	if not overrides or type(overrides) ~= "table" then return 0 end
+	if not overrides or type(overrides) ~= "table" then
+		return 0
+	end
+	DevTuning.SetOverrides(overrides)
 	local count = 0
 	for key, value in pairs(overrides) do
 		if HookConfig[key] ~= nil then
@@ -85,9 +69,13 @@ local function getOverridesFromSync()
 	local core = ReplicatedStorage:FindFirstChild("Core")
 	local config = core and core:FindFirstChild("Config")
 	local overridesVal = config and config:FindFirstChild("TuningOverrides")
-	if not overridesVal or not overridesVal:IsA("StringValue") then return nil end
+	if not overridesVal or not overridesVal:IsA("StringValue") then
+		return nil
+	end
 	local json = overridesVal.Value
-	if not json or json == "" or json == "{}" then return nil end
+	if not json or json == "" or json == "{}" then
+		return nil
+	end
 	local ok, overrides = pcall(function()
 		return HttpService:JSONDecode(json)
 	end)
@@ -98,7 +86,9 @@ local function getOverridesFromHttp()
 	local ok, res = pcall(function()
 		return HttpService:GetAsync(DEV_SERVER_URL .. "/api/config")
 	end)
-	if not ok or not res then return nil end
+	if not ok or not res then
+		return nil
+	end
 	local parsed = nil
 	pcall(function()
 		parsed = HttpService:JSONDecode(res)
@@ -109,17 +99,19 @@ end
 task.spawn(function()
 	while true do
 		local overrides = nil
-		local source = "none"
+		local _source = "none"
 		if RunService:IsRunning() then
 			overrides = getOverridesFromHttp()
-			source = overrides and "http" or "http_fail"
+			_source = overrides and "http" or "http_fail"
 			if not overrides then
 				overrides = getOverridesFromSync()
-				if overrides then source = "sync_fallback" end
+				if overrides then
+					_source = "sync_fallback"
+				end
 			end
 		else
 			overrides = getOverridesFromSync()
-			source = overrides and "sync" or "none"
+			_source = overrides and "sync" or "none"
 		end
 		applyOverrides(overrides)
 		task.wait(POLL_INTERVAL)
@@ -132,7 +124,7 @@ local LIVE_POST_INTERVAL = 0.5
 local function buildLivePayload(player, hrp, hookData)
 	local vel = hrp.AssemblyLinearVelocity
 	local pos = hrp.Position
-	return {
+	local payload = {
 		velocityMagnitude = vel.Magnitude,
 		velocity = vel.Magnitude,
 		speed = vel.Magnitude,
@@ -159,6 +151,14 @@ local function buildLivePayload(player, hrp, hookData)
 		pendulumMomentum = hookData.pendulumMomentum,
 		gravityScale = hookData.gravityScale,
 	}
+	local custom = DevTuning.GetData()
+	for k, v in pairs(custom.values) do
+		payload[k] = v
+	end
+	if next(custom.schema) then
+		payload._schema = custom.schema
+	end
+	return payload
 end
 
 RunService.Heartbeat:Connect(function()
@@ -167,28 +167,46 @@ RunService.Heartbeat:Connect(function()
 		return
 	end
 	lastWriteTime = now
+	local payload
 	local player = Players:GetPlayers()[1]
-	if not player or not player.Character then
-		return
+	if player and player.Character then
+		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") then
+			local hookData = HookService:GetDebugData(player)
+			payload = buildLivePayload(player, hrp, hookData)
+		end
 	end
-	local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-	if not hrp or not hrp:IsA("BasePart") then
-		return
+	if not payload then
+		payload = { velocityMagnitude = 0, velocity = 0, isHooked = false }
+		local custom = DevTuning.GetData()
+		for k, v in pairs(custom.values) do
+			payload[k] = v
+		end
+		if next(custom.schema) then
+			payload._schema = custom.schema
+		end
 	end
-	local hookData = HookService:GetDebugData(player)
-	local payload = buildLivePayload(player, hrp, hookData)
-	local json = HttpService:JSONEncode(payload)
-	liveVal.Value = json
-	if now - lastPostTime >= LIVE_POST_INTERVAL then
-		lastPostTime = now
-		pcall(function()
-			HttpService:RequestAsync({
-				Url = DEV_SERVER_URL .. "/api/live",
-				Method = "POST",
-				Headers = { ["Content-Type"] = "application/json" },
-				Body = json,
-			})
-		end)
+	if payload then
+		local json = HttpService:JSONEncode(payload)
+		if now - lastPostTime >= LIVE_POST_INTERVAL then
+			lastPostTime = now
+			pcall(function()
+				HttpService:RequestAsync({
+					Url = DEV_SERVER_URL .. "/api/live",
+					Method = "POST",
+					Headers = { ["Content-Type"] = "application/json" },
+					Body = json,
+				})
+			end)
+		end
+	end
+end)
+
+task.defer(function()
+	local ok, Example = pcall(function()
+		return require(script.Parent.DevTuningExample)
+	end)
+	if ok and Example then
 	end
 end)
 

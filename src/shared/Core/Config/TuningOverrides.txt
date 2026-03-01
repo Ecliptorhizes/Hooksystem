@@ -1,1 +1,1 @@
-{}
+{"mySpeed":0,"PullForceSingle":100}

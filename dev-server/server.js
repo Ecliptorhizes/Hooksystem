@@ -11,7 +11,6 @@ const WebSocket = require("ws");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
-const os = require("os");
 
 const DEV_SERVER_DIR = path.resolve(__dirname);
 const PROJECT_ROOT = path.resolve(DEV_SERVER_DIR, "..");
@@ -31,7 +30,7 @@ let lastMessagingPublish = 0;
 const MESSAGING_MIN_INTERVAL_MS = 3000;
 let messagingPending = false;
 // #region agent log
-const DEBUG_INGEST = "http://127.0.0.1:7370/ingest/3d0ecf27-f5dc-4258-87ce-54cd9abc4adb";
+const DEBUG_INGEST = "http://localhost:7370/ingest/3d0ecf27-f5dc-4258-87ce-54cd9abc4adb";
 function agentLog(location, message, data, hypothesisId) {
   try {
     fetch(DEBUG_INGEST, { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "147f07" }, body: JSON.stringify({ sessionId: "147f07", location, message, data: data || {}, hypothesisId, timestamp: Date.now() }) }).catch(() => {});
@@ -141,6 +140,8 @@ let liveValues = {
   lastUpdate: null,
 };
 
+let customSchema = {};
+
 const CONFIG_SCHEMA = {
   PullForceSingle: { min: 0, max: 100, default: 20, step: 1 },
   PullForceDual: { min: 0, max: 50, default: 10, step: 1 },
@@ -178,6 +179,12 @@ apiRouter.get("/config/merged", (req, res) => {
   for (const [key, meta] of Object.entries(CONFIG_SCHEMA)) {
     merged[key] = configOverrides[key] !== undefined ? configOverrides[key] : meta.default;
   }
+  for (const [key, meta] of Object.entries(customSchema)) {
+    if (meta && meta.slider) {
+      const def = meta.default != null ? meta.default : (meta.min != null ? meta.min : 0);
+      merged[key] = configOverrides[key] !== undefined ? configOverrides[key] : def;
+    }
+  }
   res.json(merged);
 });
 
@@ -195,7 +202,7 @@ apiRouter.post("/config", (req, res) => {
 });
 
 apiRouter.get("/schema", (req, res) => {
-  res.json(CONFIG_SCHEMA);
+  res.json({ config: CONFIG_SCHEMA, custom: customSchema });
 });
 
 apiRouter.post("/live", (req, res) => {
@@ -204,9 +211,13 @@ apiRouter.post("/live", (req, res) => {
   agentLog("server.js:POST /api/live", "live_received", { keys: Object.keys(body), hasVelocity: "velocityMagnitude" in body, vel: body.velocityMagnitude }, "H2");
   // #endregion
   writeDebugLog("POST /api/live received", { hasVelocity: "velocityMagnitude" in body, keys: Object.keys(body).slice(0, 5) });
+  const { _schema, ...rest } = body;
+  if (_schema && typeof _schema === "object") {
+    customSchema = { ...customSchema, ..._schema };
+  }
   liveValues = {
     ...liveValues,
-    ...body,
+    ...rest,
     lastUpdate: new Date().toISOString(),
   };
   res.json({ ok: true });
@@ -273,37 +284,21 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-function getLocalIp() {
-  const nets = os.networkInterfaces();
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-      if (net.family === "IPv4" && !net.internal) return net.address;
-    }
-  }
-  return null;
-}
-
 const DEV_SERVER_URL_TXT = path.join(PROJECT_ROOT, "src/shared/Core/Config/DevServerUrl.txt");
 app.listen(config.httpPort, "0.0.0.0", () => {
   // #region agent log
   agentLog("server.js:listen", "server_started", { httpPort: config.httpPort, hasKey: !!config.openCloudApiKey, keyLen: (config.openCloudApiKey || "").length, universeId: config.universeId }, "H3");
   // #endregion
   writeDebugLog("Node server started", { httpPort: config.httpPort, wsWebPort: config.wsWebPort });
-  const localIp = getLocalIp();
-  const gameUrl = localIp ? `http://${localIp}:${config.httpPort}` : null;
-  if (gameUrl) {
-    try {
-      fs.writeFileSync(DEV_SERVER_URL_TXT, gameUrl, "utf8");
-    } catch (e) {
-      console.warn("[Hooksystem] Could not write DevServerUrl.txt:", e.message);
-    }
+  const gameUrl = "http://localhost:" + config.httpPort;
+  try {
+    fs.writeFileSync(DEV_SERVER_URL_TXT, gameUrl, "utf8");
+  } catch (e) {
+    console.warn("[Hooksystem] Could not write DevServerUrl.txt:", e.message);
   }
   console.log("");
   console.log("Hooksystem Live Tuning");
-  console.log("  Dashboard: http://localhost:" + config.httpPort);
-  if (gameUrl) {
-    console.log("  Game URL:  " + gameUrl + " (Roblox needs this; localhost is blocked)");
-  }
+  console.log("  Dashboard: " + gameUrl);
   console.log("  Config: " + TUNING_OVERRIDES_PATH);
   console.log("");
 });

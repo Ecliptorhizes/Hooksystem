@@ -46,10 +46,105 @@ src/
 ├── client/           # Knit controllers (MovementController, SpawnUIController, etc.)
 ├── server/           # Knit services (HookService, SpawnService, etc.)
 └── shared/
-    └── Core/Config/
-        ├── HookConfig.luau   # All tuning parameters
-        ├── LobbyConfig.luau  # Lobby spawn position
-        └── TuningOverrides.txt  # Live-tuned values (written by dev server)
+    └── Core/
+        ├── Config/
+        │   ├── HookConfig.luau   # All tuning parameters
+        │   ├── LobbyConfig.luau  # Lobby spawn position
+        │   └── TuningOverrides.txt  # Live-tuned values (written by dev server)
+        └── DevTuning.luau       # Developer instrumentation (Report, Register)
+```
+
+---
+
+## API Reference
+
+What you can `require` and call from **server scripts** or **client scripts**. Use this for anything you're building—simulations, physics, interpolation, custom mechanics—not just the grappling demo.
+
+### Shared Modules (Server & Client)
+
+Require from `ReplicatedStorage`:
+
+| Module | Path | Description |
+|--------|------|-------------|
+| **DevTuning** | `ReplicatedStorage.Core.DevTuning` | Live tuning: `Register`, `Report`, `GetSliderValue`. Add sliders and report values to the dashboard. Server-only for reporting. |
+| **Maid** | `ReplicatedStorage.Maid` | Cleanup utility. `Maid.new()` → `:GiveTask(conn)`, `:DoCleaning()`. |
+| **MapRegistry** | `ReplicatedStorage.Core.MapRegistry` | `Maps` table and `getMaps()` for map list. |
+| **LobbyConfig** | `ReplicatedStorage.Core.Config.LobbyConfig` | Lobby spawn CFrame (`LOBBY_SPAWN_CFRAME`). |
+| **HookConfig** | `ReplicatedStorage.Core.Config.HookConfig` | Grappling demo config. Replace with your own config module for your project. |
+
+**Example (any script):**
+
+```lua
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Maid = require(ReplicatedStorage.Maid)
+local MapRegistry = require(ReplicatedStorage.Core.MapRegistry)
+
+local maid = Maid.new()
+maid:GiveTask(someConnection)
+local maps = MapRegistry.getMaps()
+```
+
+### DevTuning (Server Scripts)
+
+Add custom sliders and report values to the live dashboard. Use for any math-heavy logic—damping, lerp, forces, thresholds:
+
+```lua
+local DevTuning = require(ReplicatedStorage.Core.DevTuning)
+
+DevTuning.Register("damping", { slider = true, min = 0, max = 1, default = 0.85, step = 0.01, label = "Damping" })
+DevTuning.Register("lerpAlpha", { slider = true, min = 0, max = 1, default = 0.1, label = "Lerp alpha" })
+
+local damping = DevTuning.GetSliderValue("damping") or 0.85
+local alpha = DevTuning.GetSliderValue("lerpAlpha") or 0.1
+local result = math.lerp(prev, target, alpha) * damping
+DevTuning.Report("damping", damping)
+DevTuning.Report("lerpAlpha", alpha)
+```
+
+See [docs/DEV_TUNING.md](docs/DEV_TUNING.md) for full API.
+
+### Knit Services (Server Scripts)
+
+Get services with `Knit.GetService("ServiceName")` after `Knit.Start()`:
+
+| Service | Methods (server) | Client methods (call from client) |
+|---------|------------------|----------------------------------|
+| **SpawnService** | `RequestSpawn(player)`, `DeployToGame(player)`, `ReturnToLobby(player)`, `IsPlayerInRound(player)` | Same (client calls server) |
+| **MapService** | `GetMaps()`, `VoteMap(player, mapId)`, `StartVoting()`, `EndVoting()`, `GetWinningMap()` | `GetMaps()`, `VoteMap(mapId)`|
+| **LobbyService** | — | — |
+| **HookService** | — | Grappling demo: `RequestHook`, `ReleaseHook`, `GetGas`, etc. |
+
+**Example (server script):**
+
+```lua
+local Knit = require(ReplicatedStorage.Packages.Knit)
+
+Knit.Start():andThen(function()
+    local SpawnService = Knit.GetService("SpawnService")
+    local MapService = Knit.GetService("MapService")
+
+    local ok, err = SpawnService:RequestSpawn(player)
+    local maps = MapService.Client:GetMaps(player)
+end)
+```
+
+### Knit Client (Client Scripts)
+
+```lua
+local Knit = require(ReplicatedStorage.Packages.Knit)
+
+Knit.Start():andThen(function()
+    local SpawnService = Knit.GetService("SpawnService")
+    local MapService = Knit.GetService("MapService")
+
+    SpawnService:RequestSpawn()
+    SpawnService:DeployToGame()
+    SpawnService:ReturnToLobby()
+    local inRound = SpawnService:IsPlayerInRound()
+
+    local maps = MapService:GetMaps()
+    MapService:VoteMap("DevMap")
+end)
 ```
 
 ---
@@ -64,9 +159,24 @@ npm start
 - **Rojo** (port 34872): Syncs game files. Connect Roblox Studio to `localhost:34872`.
 - **Node** (port 34873): Hooksystem Live Tuning. Open http://localhost:34873 to adjust parameters in real time.
 
-Rojo handles file sync; the Node server handles live tuning. Both can run together via `npm start`.
-
 **Velocity graph:** The tuning dashboard uses Chart.js to plot velocity over time during hooking, with smooth curves and zoom/pan.
+
+### Developer Instrumentation
+
+Use the **DevTuning** framework to capture your own data and add **custom sliders** (like Hooksystem controls). From server scripts:
+
+```lua
+local DevTuning = require(ReplicatedStorage.Core.DevTuning)
+
+-- Custom slider: appears in left panel, tune in real time
+DevTuning.Register("mySpeed", { slider = true, min = 0, max = 100, default = 50, step = 5, label = "My speed" })
+local speed = DevTuning.GetSliderValue("mySpeed") or 50
+
+-- Report values to Custom Probes
+DevTuning.Report("mySpeed", speed)
+```
+
+See [docs/DEV_TUNING.md](docs/DEV_TUNING.md) for full usage.
 
 ---
 

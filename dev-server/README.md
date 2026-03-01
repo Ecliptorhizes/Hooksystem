@@ -2,29 +2,17 @@
 
 Live tuning dashboard for hook physics. WebSocket + HTTP API for real-time config and live event data. **Node.js only** – no Rojo, no sync.
 
-## Separation
-
-- **Rojo** = syncs game files (src/) to Studio. Run with `npm run rojo`.
-- **Node** = Hooksystem Live Tuning. Run with `npm start`.
-
 ## Run
 
 ```bash
-# Tuning server only (Node.js)
 npm start
 ```
 
-Or run both together:
-
-```bash
-npm start   # Rojo + Node
-```
-
-- **Rojo** (34872) – syncs game files only
-- **Node** (34873/34874) – tuning dashboard only
+- **Rojo** (34872) – syncs game files
+- **Node** (34873/34874) – tuning dashboard
 
 **Workflow:**
-1. `npm start` (or `npm run dev`)
+1. `npm start`
 2. In Studio: connect to **localhost:34872** (Rojo plugin)
 3. Open **http://localhost:34873** in your browser (tuning UI)
 4. Press **Play** in Studio
@@ -32,9 +20,11 @@ npm start   # Rojo + Node
 
 ## Setup
 
+From project root:
+
 ```bash
-cd dev-server
 npm install
+npm start
 ```
 
 ## Configuration
@@ -50,24 +40,11 @@ Edit `dev-server/hooksystem_config.json`:
 }
 ```
 
-If you have an existing `zipshot_config.json`, rename it to `hooksystem_config.json`.
-
-**Open Cloud (Node → Game):** For real-time config from the web dashboard to the game without localhost, add `openCloudApiKey` and `universeId`. Get the API key at [create.roblox.com](https://create.roblox.com) → Open Cloud → API Keys. Find your universe ID in Game Settings → General.
-
-## Run options
-
-| Command | What runs |
-|---------|-----------|
-| `npm start` (from root) | Rojo + tuning (both) |
-| `npm run dev` | Same as start |
-| `npm run rojo` | Rojo only (port 34872) |
-| `npm start` | Tuning only (HTTP + WebSocket) |
-
-**Using vscode-rojo:** The extension runs Rojo for you. In that case, run `npm start` in a terminal for the dashboard.
+**Open Cloud (Node → Game):** For real-time config from the web dashboard to the game, add `openCloudApiKey` and `universeId` to `hooksystem_config.json`. Get the API key at [create.roblox.com](https://create.roblox.com) → Open Cloud → API Keys. Restrict the key to your experience. Find your universe ID (game/experience ID) in Game Settings → General.
 
 ## Usage
 
-1. Start both servers:
+1. Run:
    ```bash
    npm start
    ```
@@ -80,7 +57,7 @@ If you have an existing `zipshot_config.json`, rename it to `hooksystem_config.j
 
 **Node → Game via Open Cloud:** When `openCloudApiKey` and `universeId` are set, slider changes are published to Roblox MessagingService. The game subscribes and applies config in real time.
 
-**Live data (Game → Node):** Roblox blocks HTTP from the game to localhost. On startup, the server writes your machine's local IP (e.g. `http://192.168.1.5:34873`) to `DevServerUrl.txt`. Rojo syncs that into the game. The game POSTs live data to that URL. Ensure Rojo is running so the game gets the updated URL.
+**Live data (Game → Node):** On startup, the server writes `http://localhost:34873` to `DevServerUrl.txt`. Rojo syncs that into the game. The game POSTs live data to that URL. Ensure Rojo is running so the game gets the updated URL.
 
 ## API
 
@@ -89,12 +66,11 @@ If you have an existing `zipshot_config.json`, rename it to `hooksystem_config.j
 | `/api/config` | GET | Game fetches config overrides to apply |
 | `/api/config` | POST | Web UI sends new values |
 | `/api/schema` | GET | Slider metadata (min, max, default) |
-| `/api/live` | GET | Live values (Test button only; no plugin) |
+| `/api/live` | GET | Live values (game POSTs; Test button simulates) |
 | `/api/reset` | POST | Clear all overrides |
 
 ## How It Works
 
-- **Architecture** (inspired by [PIDebug](https://github.com/Sleitnick/PIDebug)): HTTP API + WebSocket for real-time push
 - **DevTuningServer** (src/server/DevTuningServer.luau) runs only in Studio
 - Reads `TuningOverrides.txt` via Rojo sync and applies overrides to HookConfig
 - **Config**: Rojo sync (TuningOverrides.txt), HTTP poll, or Open Cloud MessagingService (when configured).
