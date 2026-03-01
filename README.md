@@ -4,9 +4,9 @@ A **Roblox grapple/hook movement system** that lets players shoot grappling hook
 
 ### Gameplay
 
-<video src="docs/gameplay.mp4" controls width="640"></video>
+![Gameplay](docs/gameplay.gif)
 
-[Download video](docs/gameplay.mp4) if the player doesn't appear.
+[Full video](docs/gameplay.mp4)
 
 ---
 
