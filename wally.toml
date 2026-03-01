@@ -1,5 +1,5 @@
 [package]
-name = "username/zipshot"
+name = "username/hooksystem"
 version = "0.1.0"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
@@ -9,6 +9,3 @@ Knit = "sleitnick/knit@^1.7"
 React = "jsdotlua/react-roblox@^17.0.2"
 Maid = "devsparkle/maid@^1.0.0"
 Promise = "evaera/promise@^4.0.0"
-
-[server-dependencies]
-ProfileService = "brittonfischer/profileservice@^2.0.0"

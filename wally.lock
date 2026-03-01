@@ -3,11 +3,6 @@
 registry = "test"
 
 [[package]]
-name = "brittonfischer/profileservice"
-version = "2.1.5"
-dependencies = []
-
-[[package]]
 name = "devsparkle/maid"
 version = "1.1.0"
 dependencies = []
@@ -123,6 +118,6 @@ version = "2.0.3"
 dependencies = []
 
 [[package]]
-name = "username/zipshot"
+name = "username/hooksystem"
 version = "0.1.0"
-dependencies = [["Knit", "sleitnick/knit@1.7.0"], ["Maid", "devsparkle/maid@1.1.0"], ["Promise", "evaera/promise@4.0.0"], ["React", "jsdotlua/react-roblox@17.2.1"], ["ProfileService", "brittonfischer/profileservice@2.1.5"]]
+dependencies = [["Knit", "sleitnick/knit@1.7.0"], ["Maid", "devsparkle/maid@1.1.0"], ["Promise", "evaera/promise@4.0.0"], ["React", "jsdotlua/react-roblox@17.2.1"]]

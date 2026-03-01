@@ -41,7 +41,6 @@ end
 
 function LobbyService:KnitStart()
     SpawnService = Knit.GetService("SpawnService")
-    local PlayerDataService = Knit.GetService("PlayerDataService")
 
     local function isInRound(p)
         return (SpawnService:IsPlayerInRound(p) or 0) == 1
@@ -76,14 +75,12 @@ function LobbyService:KnitStart()
                 end
             end)
         end)
-        PlayerDataService:LoadProfile(player)
         if player.Character then
             handleCharacterSpawn(player, player.Character)
         end
     end)
 
     for _, player in Players:GetPlayers() do
-        PlayerDataService:LoadProfile(player)
         if player.Character then
             handleCharacterSpawn(player, player.Character)
         end

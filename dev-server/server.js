@@ -1,3 +1,10 @@
+process.on("uncaughtException", (err) => {
+  console.error("[Hooksystem] Uncaught exception:", err.message);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[Hooksystem] Unhandled rejection:", reason);
+});
+
 const express = require("express");
 const cors = require("cors");
 const WebSocket = require("ws");
@@ -11,14 +18,14 @@ const PROJECT_ROOT = path.resolve(DEV_SERVER_DIR, "..");
 const TUNING_OVERRIDES_PATH = path.join(PROJECT_ROOT, "src/shared/Core/Config/TuningOverrides.txt");
 
 let config = { httpPort: 34873, wsWebPort: 34874, openCloudApiKey: "", universeId: "" };
-const configPath = path.join(DEV_SERVER_DIR, "zipshot_config.json");
+const configPath = path.join(DEV_SERVER_DIR, "hooksystem_config.json");
 try {
   config = { ...config, ...JSON.parse(fs.readFileSync(configPath, { encoding: "utf8" })) };
 } catch (err) {
-  console.warn("[Zipshot] No zipshot_config.json, using defaults:", config);
+  console.warn("[Hooksystem] No hooksystem_config.json, using defaults:", config);
 }
 
-const MESSAGING_TOPIC = "ZipshotTuning";
+const MESSAGING_TOPIC = "HooksystemTuning";
 let messagingDisabled = false;
 // #region agent log
 const DEBUG_INGEST = "http://127.0.0.1:7370/ingest/3d0ecf27-f5dc-4258-87ce-54cd9abc4adb";
@@ -57,12 +64,12 @@ function publishToMessagingService(message) {
         agentLog("server.js:publishToMessagingService", "publish_failed", { statusCode: res.statusCode, body: data.slice(0, 200) }, "H1");
         if (res.statusCode === 403) {
           messagingDisabled = true;
-          console.warn("[Zipshot] MessagingService disabled (403). Sliders still work via Rojo sync + HTTP.");
+          console.warn("[Hooksystem] MessagingService disabled (403). Sliders still work via Rojo sync + HTTP.");
           if (data.includes("cannot manage universe")) {
-            console.warn("[Zipshot] To fix: Creator Dashboard → Open Cloud → API Keys → Edit key → Restrict by Experience → select your game.");
+            console.warn("[Hooksystem] To fix: Creator Dashboard → Open Cloud → API Keys → Edit key → Restrict by Experience → select your game.");
           }
         } else {
-          console.warn("[Zipshot] MessagingService publish failed:", res.statusCode, data);
+          console.warn("[Hooksystem] MessagingService publish failed:", res.statusCode, data);
         }
       } else {
         agentLog("server.js:publishToMessagingService", "publish_ok", { statusCode: res.statusCode }, "H1");
@@ -74,7 +81,7 @@ function publishToMessagingService(message) {
     // #region agent log
     agentLog("server.js:publishToMessagingService", "publish_error", { err: err.message }, "H1");
     // #endregion
-    console.warn("[Zipshot] MessagingService error:", err.message);
+    console.warn("[Hooksystem] MessagingService error:", err.message);
   });
   req.write(body);
   req.end();
@@ -88,7 +95,7 @@ try {
   const parsed = JSON.parse(raw);
   if (typeof parsed === "object" && parsed !== null) configOverrides = parsed;
 } catch (err) {
-  console.warn("[Zipshot] Could not read TuningOverrides.txt:", err.message);
+  console.warn("[Hooksystem] Could not read TuningOverrides.txt:", err.message);
   console.warn("  Path:", TUNING_OVERRIDES_PATH);
 }
 
@@ -253,11 +260,11 @@ app.listen(config.httpPort, "0.0.0.0", () => {
     try {
       fs.writeFileSync(DEV_SERVER_URL_TXT, gameUrl, "utf8");
     } catch (e) {
-      console.warn("[Zipshot] Could not write DevServerUrl.txt:", e.message);
+      console.warn("[Hooksystem] Could not write DevServerUrl.txt:", e.message);
     }
   }
   console.log("");
-  console.log("Zipshot Live Tuning");
+  console.log("Hooksystem Live Tuning");
   console.log("  Dashboard: http://localhost:" + config.httpPort);
   if (gameUrl) {
     console.log("  Game URL:  " + gameUrl + " (Roblox needs this; localhost is blocked)");
@@ -273,8 +280,13 @@ wsWebServer.on("connection", (ws) => {
   agentLog("server.js:ws", "ws_connected", {}, "H4");
   // #endregion
   let handle;
+  let pingHandle;
   ws.on("close", () => {
     clearInterval(handle);
+    clearInterval(pingHandle);
+  });
+  ws.on("error", (err) => {
+    try { ws.terminate(); } catch (_) {}
   });
   ws.on("message", (msg) => {
     try {
@@ -290,9 +302,16 @@ wsWebServer.on("connection", (ws) => {
   });
   handle = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ live: liveValues }));
+      try {
+        ws.send(JSON.stringify({ live: liveValues }));
+      } catch (_) {}
     }
-  }, 20);
+  }, 50);
+  pingHandle = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN && ws.ping) {
+      try { ws.ping(); } catch (_) {}
+    }
+  }, 15000);
 });
 
 console.log(`WebSocket server running on port ${config.wsWebPort}`);

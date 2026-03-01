@@ -1,14 +1,14 @@
 {
-  "name": "zipshot-dev-server",
+  "name": "hooksystem-dev-server",
   "version": "1.0.0",
-  "description": "Live tuning dashboard for Zipshot hook physics",
+  "description": "Live tuning dashboard for Hooksystem hook physics",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
     "tuning": "node server.js"
   },
-  "keywords": ["roblox", "zipshot", "dev", "tuning"],
+  "keywords": ["roblox", "hooksystem", "dev", "tuning"],
   "license": "MIT",
   "dependencies": {
     "cors": "^2.8.5",

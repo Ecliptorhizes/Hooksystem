@@ -77,7 +77,7 @@ end
 
 task.spawn(function()
 	local ok = pcall(function()
-		MessagingService:SubscribeAsync("ZipshotTuning", function(message)
+		MessagingService:SubscribeAsync("HooksystemTuning", function(message)
 			local data = message.Data
 			if type(data) == "string" and data ~= "" then
 				local overrides = nil

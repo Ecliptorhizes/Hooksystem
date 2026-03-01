@@ -1,11 +1,11 @@
-# Zipshot Dev Server (Node.js Only)
+# Hooksystem Dev Server (Node.js Only)
 
-Live tuning dashboard for hook physics. **Node.js only** – no Rojo, no sync.
+Live tuning dashboard for hook physics. WebSocket + HTTP API for real-time config and live event data. **Node.js only** – no Rojo, no sync.
 
 ## Separation
 
 - **Rojo** = syncs game files (src/) to Studio. Run with `npm run rojo`.
-- **Node** = Zipshot Live Tuning. Run with `npm run tuning`.
+- **Node** = Hooksystem Live Tuning. Run with `npm run tuning`.
 
 ## Run
 
@@ -39,7 +39,7 @@ npm install
 
 ## Configuration
 
-Edit `dev-server/zipshot_config.json`:
+Edit `dev-server/hooksystem_config.json`:
 
 ```json
 {
@@ -49,6 +49,8 @@ Edit `dev-server/zipshot_config.json`:
   "universeId": "your game's universe ID"
 }
 ```
+
+If you have an existing `zipshot_config.json`, rename it to `hooksystem_config.json`.
 
 **Open Cloud (Node → Game):** For real-time config from the web dashboard to the game without localhost, add `openCloudApiKey` and `universeId`. Get the API key at [create.roblox.com](https://create.roblox.com) → Open Cloud → API Keys. Find your universe ID in Game Settings → General.
 

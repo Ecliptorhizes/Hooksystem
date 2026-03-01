@@ -1,5 +1,5 @@
 {
-  "name": "Zipshot",
+  "name": "Hooksystem",
   "globIgnorePaths": ["**/.gitkeep"],
   "tree": {
     "$className": "DataModel",

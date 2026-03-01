@@ -5,7 +5,7 @@ if not plugin then
 end
 
 -- Create toolbar so plugin is visible in Plugins tab (required for Studio to recognize it)
-local toolbar = plugin:CreateToolbar("Zipshot")
+local toolbar = plugin:CreateToolbar("Hooksystem")
 local btn = toolbar:CreateButton("Dev Tuning", "Bridges live data to tuning dashboard", "")
 
 -- Status GUI (opens when button clicked)
@@ -19,7 +19,7 @@ local function ensureStatusGui()
 	statusWidget = plugin:CreateDockWidgetPluginGui("DevTuningBridge_Status", DockWidgetPluginGuiInfo.new(
 		Enum.InitialDockState.Float, false, false, 220, 180, 220, 180
 	))
-	statusWidget.Title = "Zipshot Dev Tuning"
+	statusWidget.Title = "Hooksystem Dev Tuning"
 	local frame = Instance.new("Frame")
 	frame.Size = UDim2.fromScale(1, 1)
 	frame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)

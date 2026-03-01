@@ -4,7 +4,7 @@
 
 ## Steps
 
-1. **Open Roblox Studio** and your Zipshot place.
+1. **Open Roblox Studio** and your Hooksystem place.
 
 2. **Create a new Script:**
    - In Explorer, right-click **ServerStorage** → Insert Object → **Script**
@@ -23,7 +23,7 @@
 
 6. **Restart Studio** completely (quit and reopen).
 
-7. **Verify:** You should see a "Zipshot" section in the Plugins tab with a "Dev Tuning" button.
+7. **Verify:** You should see a "Hooksystem" section in the Plugins tab with a "Dev Tuning" button.
 
 8. **Enable HTTP requests:** Game Settings → Security → Allow HTTP Requests.
 

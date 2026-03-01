@@ -21,12 +21,12 @@ Knit.Start():andThen(function()
 		local DevTuningServer = script:FindFirstChild("DevTuningServer")
 		if DevTuningServer then
 			require(DevTuningServer)
-			print("[Zipshot] DevTuningServer loaded.")
+			print("[Hooksystem] DevTuningServer loaded.")
 		else
-			warn("[Zipshot] DevTuningServer not found in", script:GetFullName())
+			warn("[Hooksystem] DevTuningServer not found in", script:GetFullName())
 		end
 	end
 	return nil
 end):catch(function(err)
-	warn("[Zipshot] Knit.Start or DevTuningServer failed:", tostring(err))
+	warn("[Hooksystem] Knit.Start or DevTuningServer failed:", tostring(err))
 end)
