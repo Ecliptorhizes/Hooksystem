@@ -2,7 +2,14 @@
 
 A **Roblox grapple/hook movement system** that lets players shoot grappling hooks from their arms, swing through the world, reel in, boost, and use dual hooks for fluid, physics-based traversal. The project is **uncopylocked** and includes a **live tuning** dev server so you can tweak parameters in real time via a WebSocket + HTTP API.
 
+### Gameplay
+
+<video src="docs/gameplay.mp4" controls width="640"></video>
+
+[Download video](docs/gameplay.mp4) if the player doesn't appear.
+
 ---
+
 
 ## What Is This Project For?
 
