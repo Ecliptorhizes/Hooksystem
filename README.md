@@ -10,6 +10,46 @@ A **Roblox grapple/hook movement system** that lets players shoot grappling hook
 
 **Controls:** **Q** and **E** to fire hooks (left/right), **SPACE** to boost.
 
+### Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client
+        Player["Player Input<br/>Q / E / SPACE"]
+        HC["HookController"]
+    end
+
+    subgraph Server
+        HS["HookService"]
+        Attach["doAttach"]
+        Physics["Rope / Spring<br/>Constraint"]
+    end
+
+    subgraph Shared
+        Config["HookConfig"]
+    end
+
+    Player -->|"Q: left hook"| HC
+    Player -->|"E: right hook"| HC
+    Player -->|"SPACE: boost"| HC
+    HC -->|"RequestHook / ReleaseHook / RequestBoost"| HS
+    HS -->|"validates gas, range"| Attach
+    Attach -->|"creates"| Physics
+    Config -.->|"tuning params"| HS
+```
+
+```mermaid
+flowchart LR
+    subgraph Bootstrap
+        A["locateServicesFolder"]
+        B["registerServices"]
+        C["Knit.Start"]
+        D["loadDevTools"]
+    end
+
+    A --> B --> C --> D
+```
+
 ---
 
 
