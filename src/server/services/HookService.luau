@@ -108,16 +108,9 @@ local function releaseHookData(data: HookData)
 	end
 end
 
--- Left/Right arm part for attachment origin; falls back to HRP if not found
 local function getArmPart(character: Model, isLeft: boolean): BasePart?
-	local names = isLeft and { "Left Arm" } or { "Right Arm" }
-	for _, name in names do
-		local part = character:FindFirstChild(name)
-		if part and part:IsA("BasePart") then
-			return part
-		end
-	end
-	return nil
+	local part = character:FindFirstChild(isLeft and "Left Arm" or "Right Arm")
+	return part and part:IsA("BasePart") and part or nil
 end
 
 -- Rotate vector `from` toward `to` by at most `maxRad` radians (used for reel angle)
@@ -141,13 +134,51 @@ local function rotateTowards(from: Vector3, to: Vector3, maxRad: number): Vector
 	return (CFrame.fromAxisAngle(axis.Unit, rotateBy) * fromNorm).Unit
 end
 
--- World position where hook originates from arm (offset by HookArmForwardOffset, HookArmSideOffset)
+local UP = Vector3.new(0, 1, 0)
+
+local function isRagdollState(st: Enum.HumanoidStateType): boolean
+	return st == Enum.HumanoidStateType.Ragdoll
+		or st == Enum.HumanoidStateType.FallingDown
+		or st == Enum.HumanoidStateType.Physics
+end
+
 local function getHookOriginWorldPos(armPart: BasePart, hrp: BasePart, isLeft: boolean): Vector3
 	local look = hrp.CFrame.LookVector
 	local right = hrp.CFrame.RightVector
 	local forward = look * (HookConfig.HookArmForwardOffset or 1.2)
 	local side = right * ((HookConfig.HookArmSideOffset or 0.4) * (isLeft and -1 or 1))
 	return armPart.Position + forward + side
+end
+
+-- Updates rope length and beam visual for one hook; returns direction to anchor for toAnchor accumulation
+local function updateRopeAndBeam(
+	data: HookData,
+	ropeDelta: number,
+	sway: number,
+	hrp: BasePart,
+	beamThickness: number,
+	maxRange: number
+): Vector3
+	local originPos = data.PlayerAtt.WorldPosition
+	local anchorPos = data.TargetAtt.WorldPosition
+	local toDir = (anchorPos - hrp.Position).Unit
+	local currentLen = data.Constraint:IsA("SpringConstraint") and data.Constraint.FreeLength
+		or (data.Constraint :: RopeConstraint).Length
+	local anchorDist = (anchorPos - originPos).Magnitude
+	local maxLen = math.min(maxRange, anchorDist + 50)
+	local newLen = ropeDelta >= 0 and math.max(5, currentLen - ropeDelta)
+		or math.min(maxLen, currentLen - ropeDelta)
+	if data.Constraint:IsA("SpringConstraint") then
+		data.Constraint.FreeLength = newLen
+	else
+		(data.Constraint :: RopeConstraint).Length = newLen
+	end
+	local len = (anchorPos - originPos).Magnitude
+	data.BeamPart.Size = Vector3.new(beamThickness, len, beamThickness)
+	local baseCF = CFrame.lookAt(originPos, anchorPos) * CFrame.Angles(-math.rad(90), 0, 0)
+	data.BeamPart.CFrame = (baseCF * CFrame.Angles(sway, sway * 0.5, 0))
+	data.BeamPart.Position = (originPos + anchorPos) / 2
+	return toDir
 end
 
 -- Core attach logic: create Rope/SpringConstraint, beam Part, attachments, arm force; set up heartbeat physics
@@ -327,12 +358,8 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 		if state.RagdollPreventionConn then
 			state.RagdollPreventionConn:Disconnect()
 		end
-		state.RagdollPreventionConn = hum.StateChanged:Connect(function(old, new)
-			if
-				new == Enum.HumanoidStateType.Ragdoll
-				or new == Enum.HumanoidStateType.FallingDown
-				or new == Enum.HumanoidStateType.Physics
-			then
+		state.RagdollPreventionConn = hum.StateChanged:Connect(function(_old, new)
+			if isRagdollState(new) then
 				task.defer(function()
 					if hum and hum.Parent then
 						hum:ChangeState(Enum.HumanoidStateType.PlatformStanding)
@@ -382,7 +409,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 	else
 		if HookConfig.UseArmForce then
 			local toTarget = (hitPosition - hrp.Position).Unit
-			local tangent = toTarget:Cross(Vector3.new(0, 1, 0))
+			local tangent = toTarget:Cross(UP)
 			if tangent.Magnitude > 0.01 then
 				tangent = tangent.Unit
 				local kick = HookConfig.PendulumKickSpeed or 18
@@ -403,15 +430,8 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 			end
 			local hum = player.Character:FindFirstChildOfClass("Humanoid")
 			local hrp2 = player.Character:FindFirstChild("HumanoidRootPart")
-			if hum and hrp2 then
-				local st = hum:GetState()
-				if
-					st == Enum.HumanoidStateType.Ragdoll
-					or st == Enum.HumanoidStateType.FallingDown
-					or st == Enum.HumanoidStateType.Physics
-				then
-					hum:ChangeState(Enum.HumanoidStateType.PlatformStanding)
-				end
+			if hum and hrp2 and isRagdollState(hum:GetState()) then
+				hum:ChangeState(Enum.HumanoidStateType.PlatformStanding)
 			end
 			if HookConfig.UseArmForce then
 				local leftData = s.left
@@ -424,7 +444,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 					local firstData = leftData or rightData
 					if firstData then
 						local toTarget = (firstData.TargetAtt.WorldPosition - firstData.PlayerAtt.WorldPosition).Unit
-						local tangent = toTarget:Cross(Vector3.new(0, 1, 0))
+						local tangent = toTarget:Cross(UP)
 						if tangent.Magnitude > 0.01 then
 							tangent = tangent.Unit
 							local nudgeSpeed = HookConfig.PendulumNudgeSpeed or 22
@@ -453,15 +473,8 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 				return
 			end
 			local hum = player.Character:FindFirstChildOfClass("Humanoid")
-			if hum then
-				local st = hum:GetState()
-				if
-					st == Enum.HumanoidStateType.Ragdoll
-					or st == Enum.HumanoidStateType.FallingDown
-					or st == Enum.HumanoidStateType.Physics
-				then
-					hum:ChangeState(Enum.HumanoidStateType.PlatformStanding)
-				end
+			if hum and isRagdollState(hum:GetState()) then
+				hum:ChangeState(Enum.HumanoidStateType.PlatformStanding)
 			end
 			local velCap = HookConfig.MaxVelocityWhileHooked
 			if velCap and velCap > 0 then
@@ -501,86 +514,54 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 			local delta = now - (s.LastTick or now)
 			s.LastTick = now
 
-			local toAnchor = Vector3.zero
+			-- Cache config for this frame
+			local cfg = {
+				BeamThickness = HookConfig.BeamThickness,
+				MaxRange = HookConfig.MaxRange,
+				RopeSwayFrequency = HookConfig.RopeSwayFrequency,
+				RopeSwayAmplitude = HookConfig.RopeSwayAmplitude,
+				PullForceDual = HookConfig.PullForceDual,
+				PullForceSingle = HookConfig.PullForceSingle,
+				ReelInPullForce = HookConfig.ReelInPullForce,
+				ReelForceRange = HookConfig.ReelForceRange,
+				RopeShortenSpeed = HookConfig.RopeShortenSpeed or 28,
+				RopeExtendSpeed = HookConfig.RopeExtendSpeed or 22,
+				RopeReelInMultiplier = HookConfig.RopeReelInMultiplier or 1.0,
+			}
+
 			local velocity = hrp.AssemblyLinearVelocity
 			local velocityMag = velocity.Magnitude
-			local sway = math.sin(tick() * HookConfig.RopeSwayFrequency)
-				* HookConfig.RopeSwayAmplitude
-				* (1 + velocityMag * 0.01)
-			local pullForce = (leftData and rightData) and HookConfig.PullForceDual or HookConfig.PullForceSingle
-			local reelInPull = HookConfig.ReelInPullForce or pullForce
-			-- reelForceVal: positive = reel in, negative = extend. From client SetReelForce (W/S or similar)
-			local reelForceVal =
-				math.clamp(playerReelForce[player.UserId] or 0, -HookConfig.ReelForceRange, HookConfig.ReelForceRange)
+			local sway = math.sin(now * cfg.RopeSwayFrequency) * cfg.RopeSwayAmplitude * (1 + velocityMag * 0.01)
+			local pullForce = (leftData and rightData) and cfg.PullForceDual or cfg.PullForceSingle
+			local reelInPull = cfg.ReelInPullForce or pullForce
+			local reelForceVal = math.clamp(playerReelForce[player.UserId] or 0, -cfg.ReelForceRange, cfg.ReelForceRange)
+			local boostWindow = (s.LastBoostTime and (now - s.LastBoostTime) < 0.6)
 
-			local shortenSpeed = HookConfig.RopeShortenSpeed or 28
-			local extendSpeed = HookConfig.RopeExtendSpeed or 22
-			local boostWindow = (s.LastBoostTime and (tick() - s.LastBoostTime) < 0.6)
 			local ropeDelta = 0
 			if reelForceVal > 0 then
-				local reelMult = HookConfig.RopeReelInMultiplier or 1.0
-				ropeDelta = shortenSpeed * reelMult * delta
+				ropeDelta = cfg.RopeShortenSpeed * cfg.RopeReelInMultiplier * delta
 			elseif reelForceVal < 0 then
-				ropeDelta = -extendSpeed * delta
-			end
-			if leftData then
-				local originPos = leftData.PlayerAtt.WorldPosition
-				local anchorPos = leftData.TargetAtt.WorldPosition
-				local toLeft = (anchorPos - hrp.Position).Unit
-				toAnchor = toAnchor + toLeft
-				local currentLen = leftData.Constraint:IsA("SpringConstraint") and leftData.Constraint.FreeLength
-					or (leftData.Constraint :: RopeConstraint).Length
-				local anchorDist = (anchorPos - originPos).Magnitude
-				local maxLen = math.min(HookConfig.MaxRange, anchorDist + 50)
-				local newLen = ropeDelta >= 0 and math.max(5, currentLen - ropeDelta)
-					or math.min(maxLen, currentLen - ropeDelta)
-				if leftData.Constraint:IsA("SpringConstraint") then
-					leftData.Constraint.FreeLength = newLen
-				else
-					(leftData.Constraint :: RopeConstraint).Length = newLen
-				end
-				local len = (anchorPos - originPos).Magnitude
-				leftData.BeamPart.Size = Vector3.new(HookConfig.BeamThickness, len, HookConfig.BeamThickness)
-				local baseCF = CFrame.lookAt(originPos, anchorPos) * CFrame.Angles(-math.rad(90), 0, 0)
-				leftData.BeamPart.CFrame = (baseCF * CFrame.Angles(sway, sway * 0.5, 0))
-				leftData.BeamPart.Position = (originPos + anchorPos) / 2
-			end
-			if rightData then
-				local originPos = rightData.PlayerAtt.WorldPosition
-				local anchorPos = rightData.TargetAtt.WorldPosition
-				local toRight = (anchorPos - hrp.Position).Unit
-				toAnchor = toAnchor + toRight
-				local currentLen = rightData.Constraint:IsA("SpringConstraint") and rightData.Constraint.FreeLength
-					or (rightData.Constraint :: RopeConstraint).Length
-				local anchorDist = (anchorPos - originPos).Magnitude
-				local maxLen = math.min(HookConfig.MaxRange, anchorDist + 50)
-				local newLen = ropeDelta >= 0 and math.max(5, currentLen - ropeDelta)
-					or math.min(maxLen, currentLen - ropeDelta)
-				if rightData.Constraint:IsA("SpringConstraint") then
-					rightData.Constraint.FreeLength = newLen
-				else
-					(rightData.Constraint :: RopeConstraint).Length = newLen
-				end
-				local len = (anchorPos - originPos).Magnitude
-				rightData.BeamPart.Size = Vector3.new(HookConfig.BeamThickness, len, HookConfig.BeamThickness)
-				local baseCF = CFrame.lookAt(originPos, anchorPos) * CFrame.Angles(-math.rad(90), 0, 0)
-				rightData.BeamPart.CFrame = (baseCF * CFrame.Angles(sway, sway * 0.5, 0))
-				rightData.BeamPart.Position = (originPos + anchorPos) / 2
+				ropeDelta = -cfg.RopeExtendSpeed * delta
 			end
 
+			local toAnchor = Vector3.zero
+			if leftData then
+				toAnchor = toAnchor + updateRopeAndBeam(leftData, ropeDelta, sway, hrp, cfg.BeamThickness, cfg.MaxRange)
+			end
+			if rightData then
+				toAnchor = toAnchor + updateRopeAndBeam(rightData, ropeDelta, sway, hrp, cfg.BeamThickness, cfg.MaxRange)
+			end
+
+			local goalPos = (leftData and rightData)
+					and ((leftData.TargetAtt.WorldPosition + rightData.TargetAtt.WorldPosition) / 2)
+				or (leftData and leftData.TargetAtt.WorldPosition or rightData.TargetAtt.WorldPosition)
 			if (not HookConfig.UseArmForce) and HookConfig.OrientToAnchor and toAnchor.Magnitude > 0.01 then
-				local anchorPos = (leftData and rightData)
-						and ((leftData.TargetAtt.WorldPosition + rightData.TargetAtt.WorldPosition) / 2)
-					or (leftData and leftData.TargetAtt.WorldPosition or rightData.TargetAtt.WorldPosition)
-				local targetCF = CFrame.lookAt(hrp.Position, anchorPos)
+				local targetCF = CFrame.lookAt(hrp.Position, goalPos)
 				hrp.CFrame = hrp.CFrame:Lerp(targetCF, math.min(1, HookConfig.OrientLerpSpeed * delta))
 			end
 
 			local dir = toAnchor.Unit
 			local swingVal = playerSwingForce[player.UserId] or 0
-			local goalPos = (leftData and rightData)
-					and ((leftData.TargetAtt.WorldPosition + rightData.TargetAtt.WorldPosition) / 2)
-				or (leftData and leftData.TargetAtt.WorldPosition or rightData.TargetAtt.WorldPosition)
 			local distToGoal = (goalPos - hrp.Position).Magnitude
 			local stopNearDist = HookConfig.StopNearAnchorDist or 2
 			-- UseGrapplePhysics: direct velocity toward anchor. Else: pendulum-style with momentum.
@@ -626,7 +607,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 				local angleToDir = (velMagForAngle >= 0.1)
 						and math.deg(math.acos(math.clamp(velocity.Unit:Dot(dir), -1, 1)))
 					or 0
-				local canReel = (angleToDir > 90) and (s.ReelEndTime and tick() < s.ReelEndTime)
+				local canReel = (angleToDir > 90) and (s.ReelEndTime and now < s.ReelEndTime)
 				if canReel and velMagForAngle >= 0.1 then
 					local speed = velocityMag + (HookConfig.ReelSpeedRetention or 0.1)
 					baseVel = rotateTowards(velocity, dir, reelAngle) * speed
@@ -643,7 +624,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 					baseVel = dir * reelInPull + momentumAlong * HookConfig.VelocityScaleMultiplier
 				else
 					s.ReelEndTime = nil
-					if s.JumpBoostEndTime and tick() < s.JumpBoostEndTime then
+					if s.JumpBoostEndTime and now < s.JumpBoostEndTime then
 						baseVel = dir * pullForce
 							+ momentumAlong * HookConfig.VelocityScaleMultiplier
 							+ Vector3.new(0, HookConfig.JumpForce, 0)
@@ -653,7 +634,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 					end
 				end
 				if swingVal ~= 0 then
-					local right = dir:Cross(Vector3.new(0, 1, 0)).Unit
+					local right = dir:Cross(UP).Unit
 					if right.Magnitude < 0.01 then
 						right = hrp.CFrame.RightVector
 					end
@@ -680,7 +661,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 						if boostWindow then
 							mag = HookConfig.ArmPullForce or 3500
 							local rampSec = HookConfig.ArmForceRampUpSec or 0.4
-							local elapsed = tick() - (data.AttachTime or tick())
+							local elapsed = now - (data.AttachTime or now)
 							local ramp = rampSec > 0 and math.min(1, elapsed / rampSec) or 1
 							mag = mag * ramp
 						end
@@ -690,7 +671,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 							mag = HookConfig.ArmReelForce or 7000
 						end
 						local rampSec = HookConfig.ArmForceRampUpSec or 0.4
-						local elapsed = tick() - (data.AttachTime or tick())
+						local elapsed = now - (data.AttachTime or now)
 						local ramp = rampSec > 0 and math.min(1, elapsed / rampSec) or 1
 						mag = mag * ramp
 					end
@@ -700,7 +681,7 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 					end
 					local swingVal = playerSwingForce[player.UserId] or 0
 					if swingVal ~= 0 then
-						local right = toTarget:Cross(Vector3.new(0, 1, 0)).Unit
+						local right = toTarget:Cross(UP).Unit
 						if right.Magnitude < 0.01 then
 							right = hrp.CFrame.RightVector
 						end
