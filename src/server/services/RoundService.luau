@@ -1,3 +1,9 @@
+--[[
+	RoundService - Lobby countdown, round lifecycle, map voting.
+	Flow: Waiting (countdown) → InProgress → PostRound → teleport to lobby → vote → repeat.
+	Tracks kills, deaths, headshots, bestTimeSeconds per player.
+]]
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -13,6 +19,7 @@ local LOBBY_COUNTDOWN_SEC = 30
 local ROUND_DURATION_SEC = 600
 local VOTE_DURATION_SEC = 15
 
+-- Per-player stats for leaderboard and round end
 type PlayerStats = {
     kills: number,
     deaths: number,
@@ -32,6 +39,7 @@ local playerStats: { [number]: PlayerStats } = {}
 local roundStartTime = 0
 local roundEndData: any = nil
 
+-- Leaderboard entries sorted by kills (for round end UI)
 local function getLeaderboard(): { any }
     local entries = {}
     for userId, stats in playerStats do 
@@ -46,6 +54,7 @@ local function getLeaderboard(): { any }
     return entries
 end 
 
+-- Build roundEndData (leaderboard, playerStats, maps) for client UI
 local function buildRoundEndData()
     local leaderboard = getLeaderboard()
     local statsCopy: { [number]: any } = {}
@@ -64,6 +73,7 @@ local function buildRoundEndData()
     }
 end 
 
+-- Clear round state, teleport all players to lobby
 local function teleportAllToLobby()
     SpawnService:ClearAllFromRound()
     for _, player in Players:GetPlayers() do 
@@ -76,6 +86,7 @@ local function teleportAllToLobby()
     end 
 end 
 
+-- Start lobby countdown; after LOBBY_COUNTDOWN_SEC, start round; after ROUND_DURATION_SEC, post-round → vote → repeat
 local function startLobbyCountdown()
     roundState = "Waiting"
     playerStats = {}
@@ -107,14 +118,16 @@ local function startLobbyCountdown()
             MapService:StartVoting()
 
             task.delay(VOTE_DURATION_SEC, function()
-                local _winningMapId = MapService:GetWinningMap()
+                local winningMapId = MapService:GetWinningMap()
                 MapService:EndVoting()
+                SpawnService:SetCurrentMap(winningMapId)
                 startLobbyCountdown()
             end)
         end)
     end)
 end 
 
+-- Called when a player gets a kill (e.g. from combat/game logic)
 function RoundService:RecordKill(killer: Player, victim: Player, isHeadshot: boolean)
     local s = playerStats[killer.UserId]
     if s then 
@@ -123,6 +136,7 @@ function RoundService:RecordKill(killer: Player, victim: Player, isHeadshot: boo
     end 
 end 
 
+-- Called when a player dies; records bestTimeSeconds (survival time)
 function RoundService:RecordDeath(player: Player)
     local s = playerStats[player.UserId]
     if s and not s.hadDied then 
@@ -131,6 +145,7 @@ function RoundService:RecordDeath(player: Player)
     end
 end 
 
+-- Returns "Waiting" | "InProgress" | "PostRound"
 function RoundService:GetRoundState()
     return roundState
 end
@@ -139,10 +154,12 @@ function RoundService.Client:GetRoundState(_player: Player)
     return roundState 
 end 
 
+-- Returns { leaderboard, playerStats, maps } for post-round UI
 function RoundService.Client:GetRoundEndData(_player: Player)
     return roundEndData 
 end 
 
+-- KnitStart: resolve MapService, SpawnService; wire Humanoid.Died → RecordDeath; start lobby countdown
 function RoundService:KnitStart()
     MapService = Knit.GetService("MapService")
     SpawnService = Knit.GetService("SpawnService")
