@@ -15,11 +15,13 @@ local Maps: { [string]: MapInfo } = {
         id = "RatioIsland",
         name = "Ratio Island",
         difficulty = "Normal",
+        spawnPoints = { CFrame.new(0, 5, 0) },
     },
     RatioLava = {
         id = "RatioLava",
         name = "Ratio Lava",
-        difficulty = "Hard"
+        difficulty = "Hard",
+        spawnPoints = { CFrame.new(0, 5, 0) },
     },
 
 }

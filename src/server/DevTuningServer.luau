@@ -1,3 +1,9 @@
+--[[
+	DevTuningServer - Studio-only bridge to the Node.js tuning dashboard.
+	Polls config from HTTP or Rojo-synced TuningOverrides; POSTs live data (velocity, gas, etc.) to /api/live.
+	Also subscribes to MessagingService for cross-server config sync.
+]]
+
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local MessagingService = game:GetService("MessagingService")
@@ -15,6 +21,7 @@ local HookConfig = require(ReplicatedStorage.Core.Config.HookConfig)
 local DevTuning = require(ReplicatedStorage.Core.DevTuning)
 local HookService = Knit.GetService("HookService")
 
+-- Resolve dev server URL: DevServerUrl.txt (Rojo sync) or HookConfig.DevTuningServerUrl
 local function getDevServerUrl()
 	local core = ReplicatedStorage:FindFirstChild("Core")
 	local config = core and core:FindFirstChild("Config")
@@ -28,6 +35,7 @@ local DEV_SERVER_URL = getDevServerUrl()
 local POLL_INTERVAL = 2
 local LIVE_WRITE_INTERVAL = 0.1
 
+-- Apply overrides to DevTuning and HookConfig; returns count of HookConfig keys updated
 local function applyOverrides(overrides)
 	if not overrides or type(overrides) ~= "table" then
 		return 0
@@ -43,6 +51,7 @@ local function applyOverrides(overrides)
 	return count
 end
 
+-- MessagingService: receive config from Node server (cross-server sync when Node publishes)
 task.spawn(function()
 	local ok = pcall(function()
 		MessagingService:SubscribeAsync("HooksystemTuning", function(message)
@@ -65,6 +74,7 @@ task.spawn(function()
 	end
 end)
 
+-- Read overrides from TuningOverrides.txt (Rojo sync; written by Node when HTTP unavailable)
 local function getOverridesFromSync()
 	local core = ReplicatedStorage:FindFirstChild("Core")
 	local config = core and core:FindFirstChild("Config")
@@ -82,6 +92,7 @@ local function getOverridesFromSync()
 	return ok and overrides or nil
 end
 
+-- Fetch overrides from Node dev server GET /api/config
 local function getOverridesFromHttp()
 	local ok, res = pcall(function()
 		return HttpService:GetAsync(DEV_SERVER_URL .. "/api/config")
@@ -96,6 +107,7 @@ local function getOverridesFromHttp()
 	return parsed
 end
 
+-- Poll loop: HTTP first, fallback to sync; apply overrides every POLL_INTERVAL
 task.spawn(function()
 	while true do
 		local overrides = nil
@@ -121,6 +133,8 @@ end)
 local lastWriteTime = 0
 local lastPostTime = 0
 local LIVE_POST_INTERVAL = 0.5
+
+-- Build JSON payload: velocity, position, hook state, gas, DevTuning custom values + schema
 local function buildLivePayload(player, hrp, hookData)
 	local vel = hrp.AssemblyLinearVelocity
 	local pos = hrp.Position
@@ -161,6 +175,7 @@ local function buildLivePayload(player, hrp, hookData)
 	return payload
 end
 
+-- Heartbeat: sample first player's hook data, merge DevTuning custom values, POST to /api/live
 RunService.Heartbeat:Connect(function()
 	local now = tick()
 	if now - lastWriteTime < LIVE_WRITE_INTERVAL then
@@ -176,6 +191,7 @@ RunService.Heartbeat:Connect(function()
 			payload = buildLivePayload(player, hrp, hookData)
 		end
 	end
+	-- Fallback when no player: still send DevTuning custom values for dashboard
 	if not payload then
 		payload = { velocityMagnitude = 0, velocity = 0, isHooked = false }
 		local custom = DevTuning.GetData()
@@ -188,6 +204,7 @@ RunService.Heartbeat:Connect(function()
 	end
 	if payload then
 		local json = HttpService:JSONEncode(payload)
+		-- Throttle POSTs to avoid flooding the dev server
 		if now - lastPostTime >= LIVE_POST_INTERVAL then
 			lastPostTime = now
 			pcall(function()
@@ -202,6 +219,7 @@ RunService.Heartbeat:Connect(function()
 	end
 end)
 
+-- Load DevTuningExample (demo probes + custom slider) after Knit is ready
 task.defer(function()
 	local ok, Example = pcall(function()
 		return require(script.Parent.DevTuningExample)
