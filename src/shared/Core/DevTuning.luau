@@ -16,6 +16,9 @@ local overrides = {}
 
 local DevTuning = {}
 
+--[[
+	Registers metadata for a probe key (units, slider bounds, chart behavior).
+]]
 function DevTuning.Register(key, meta)
 	if type(key) ~= "string" or key == "" then
 		return
@@ -35,6 +38,9 @@ function DevTuning.Register(key, meta)
 	}
 end
 
+--[[
+	Applies externally supplied override values for slider-backed keys.
+]]
 function DevTuning.SetOverrides(tbl)
 	if type(tbl) ~= "table" then
 		return
@@ -42,6 +48,9 @@ function DevTuning.SetOverrides(tbl)
 	overrides = tbl
 end
 
+--[[
+	Returns effective slider value (override first, then registered default).
+]]
 function DevTuning.GetSliderValue(key)
 	if type(key) ~= "string" or key == "" then
 		return nil
@@ -56,6 +65,9 @@ function DevTuning.GetSliderValue(key)
 	return nil
 end
 
+--[[
+	Reports a value for a probe key, creating default schema metadata when needed.
+]]
 function DevTuning.Report(key, value)
 	if type(key) ~= "string" or key == "" then
 		return
@@ -82,6 +94,9 @@ function DevTuning.Report(key, value)
 	end
 end
 
+--[[
+	Returns a snapshot copy of values and schema for transport/UI.
+]]
 function DevTuning.GetData()
 	return {
 		values = table.clone(values),

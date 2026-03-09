@@ -90,7 +90,10 @@ local function getHookOriginWorldPos(armPart: BasePart, humanoidRootPart: BasePa
 	return HookProjectile.getHookOriginWorldPos(armPart, humanoidRootPart, isLeft)
 end
 
--- Core attach: create constraint, beam, attachments; set up heartbeat physics.
+--[[
+	Performs server-authoritative hook attachment for one side.
+	Creates constraints/visuals, updates player state, and ensures simulation loops are active.
+]]
 local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vector3, isLeft: boolean): (boolean, string?)
 	local humanoidRootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	if not humanoidRootPart then
@@ -404,6 +407,9 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 	return true, nil
 end
 
+--[[
+	Direct hook request using a validated target part and hit position.
+]]
 function HookService:RequestHook(
 	player: Player,
 	targetPart: BasePart,
@@ -437,6 +443,9 @@ function HookService:RequestHook(
 	return doAttach(player, targetPart, hitPosition, isLeft)
 end
 
+--[[
+	Projectile hook request that raycasts over time until attach/cancel/failure.
+]]
 function HookService:RequestFireHook(
 	player: Player,
 	origin: Vector3,
@@ -483,6 +492,9 @@ function HookService:RequestFireHook(
 	)
 end
 
+--[[
+	Processes jump input while hooked and selects reel vs jump-boost behavior from angle.
+]]
 function HookService:RequestJump(player: Player, isLeft: boolean): boolean
 	local playerState = playerHooks[player.UserId]
 	if not playerState or not player.Character then
@@ -517,6 +529,9 @@ function HookService:RequestJump(player: Player, isLeft: boolean): boolean
 	return true
 end
 
+--[[
+	Processes boost input while hooked and applies server-side velocity impulse.
+]]
 function HookService:RequestBoost(player: Player, isLeft: boolean): boolean
 	local playerState = playerHooks[player.UserId]
 	if not playerState or not player.Character then
@@ -573,6 +588,9 @@ function HookService:RequestBoost(player: Player, isLeft: boolean): boolean
 	return true
 end
 
+--[[
+	Releases one hook side and performs full cleanup when both hooks are detached.
+]]
 function HookService:ReleaseHook(player: Player, isLeft: boolean)
 	local key = isLeft and "left" or "right"
 	local cancel = playerProjectileCancel[player.UserId]
@@ -644,50 +662,86 @@ function HookService:ReleaseHook(player: Player, isLeft: boolean)
 	end
 end
 
+--[[
+	Sets lateral swing input value from client in range [-1, 1].
+]]
 function HookService:SetSwingForce(player: Player, force: number)
 	playerSwingForce[player.UserId] = math.clamp(force, -1, 1)
 end
 
+--[[
+	Client RPC proxy for SetSwingForce.
+]]
 function HookService.Client:SetSwingForce(player: Player, force: number)
 	self.Server:SetSwingForce(player, force)
 end
 
+--[[
+	Client RPC proxy for RequestHook.
+]]
 function HookService.Client:RequestHook(player: Player, targetPart: BasePart, hitPosition: Vector3, isLeft: boolean)
 	return self.Server:RequestHook(player, targetPart, hitPosition, isLeft)
 end
 
+--[[
+	Client RPC proxy for RequestFireHook.
+]]
 function HookService.Client:RequestFireHook(player: Player, origin: Vector3, direction: Vector3, isLeft: boolean)
 	return self.Server:RequestFireHook(player, origin, direction, isLeft)
 end
 
+--[[
+	Client RPC proxy for ReleaseHook.
+]]
 function HookService.Client:ReleaseHook(player: Player, isLeft: boolean)
 	self.Server:ReleaseHook(player, isLeft)
 end
 
+--[[
+	Client RPC proxy for RequestJump.
+]]
 function HookService.Client:RequestJump(player: Player, isLeft: boolean)
 	return self.Server:RequestJump(player, isLeft)
 end
 
+--[[
+	Client RPC proxy for RequestBoost.
+]]
 function HookService.Client:RequestBoost(player: Player, isLeft: boolean)
 	return self.Server:RequestBoost(player, isLeft)
 end
 
+--[[
+	Returns current gas for a player.
+]]
 function HookService:GetGas(player: Player): number
 	return HookGas.getGas(player)
 end
 
+--[[
+	Sets reel force input value from client.
+]]
 function HookService:SetReelForce(player: Player, force: number)
 	playerReelForce[player.UserId] = force
 end
 
+--[[
+	Client RPC proxy for SetReelForce.
+]]
 function HookService.Client:SetReelForce(player: Player, force: number)
 	self.Server:SetReelForce(player, force)
 end
 
+--[[
+	Client RPC proxy for GetGas.
+]]
 function HookService.Client:GetGas(player: Player)
 	return self.Server:GetGas(player)
 end
 
+--[[
+	Returns debug payload consumed by DevTuningServer telemetry pipeline.
+]]
 function HookService:GetDebugData(player: Player): { [string]: any }
 	local playerState = playerHooks[player.UserId]
 	local gas = HookGas.getGas(player)
@@ -750,6 +804,9 @@ function HookService:GetDebugData(player: Player): { [string]: any }
 	}
 end
 
+--[[
+	Initializes player state tables and gas-regeneration loop.
+]]
 function HookService:KnitInit()
 	for _, player in Players:GetPlayers() do
 		HookGas.initPlayerGas(player)

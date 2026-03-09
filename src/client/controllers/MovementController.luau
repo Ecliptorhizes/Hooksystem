@@ -24,6 +24,10 @@ local slideVelocity: Vector3? = nil
 local SLIDE_FORCE = 80
 local SLIDE_DECAY = 0.95
 
+--[[
+	Returns true when any hook attachment exists on the character.
+	Sliding is disabled in this state to avoid conflicting movement behaviors.
+]]
 local function isCharacterHooked(character: Model): boolean
 	for _, descendant in character:GetDescendants() do
 		if not descendant:IsA("Attachment") then
@@ -36,6 +40,9 @@ local function isCharacterHooked(character: Model): boolean
 	return false
 end
 
+--[[
+	Initializes heartbeat-driven slide behavior.
+]]
 function MovementController:KnitStart()
 	local player = Players.LocalPlayer
 
@@ -82,6 +89,9 @@ function MovementController:KnitStart()
 	end))
 end
 
+--[[
+	Disposes all movement controller connections and tasks.
+]]
 function MovementController:KnitDestroy()
 	maid:DoCleaning()
 end

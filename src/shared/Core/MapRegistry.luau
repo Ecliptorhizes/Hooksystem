@@ -32,6 +32,9 @@ local Maps: { [string]: MapInfo } = {
 
 }
 
+--[[
+	Returns a flat array view of configured maps for UI/service consumers.
+]]
 local function getMaps(): { MapInfo }
 	local mapList = {}
 	for _, map in Maps do

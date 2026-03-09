@@ -26,7 +26,9 @@ local LobbyService = Knit.CreateService({
 
 local SpawnService
 
--- Move character to lobby spawn (LOBBY_SPAWN_CFRAME)
+--[[
+	Resolves and validates HumanoidRootPart for teleport operations.
+]]
 local function getHumanoidRootPart(character: Model): BasePart?
 	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 2)
 	if humanoidRootPart and humanoidRootPart:IsA("BasePart") then
@@ -35,6 +37,9 @@ local function getHumanoidRootPart(character: Model): BasePart?
 	return nil
 end
 
+--[[
+	Teleports a character to lobby spawn.
+]]
 local function teleportToLobby(character: Model)
 	local humanoidRootPart = getHumanoidRootPart(character)
 	if not humanoidRootPart then
@@ -43,7 +48,9 @@ local function teleportToLobby(character: Model)
 	humanoidRootPart.CFrame = LOBBY_SPAWN_CFRAME
 end
 
--- Move character to a random spawn point for the current map (from MapRegistry)
+--[[
+	Teleports a character to a random spawn point on the active map.
+]]
 local function teleportToMap(character: Model)
 	local humanoidRootPart = getHumanoidRootPart(character)
 	if not humanoidRootPart then
@@ -58,7 +65,9 @@ local function teleportToMap(character: Model)
 	humanoidRootPart.CFrame = spawnCFrame
 end
 
--- True if position is within LOBBY_RADIUS of lobby spawn
+--[[
+	Returns true when the given position is inside the lobby radius threshold.
+]]
 local function isInLobby(pos: Vector3): boolean
 	return (pos - LOBBY_SPAWN_CFRAME.Position).Magnitude < LOBBY_RADIUS
 end
@@ -66,7 +75,9 @@ end
 function LobbyService:KnitInit()
 end
 
--- KnitStart: wire CharacterAdded and Heartbeat; teleport to lobby or map based on round state
+--[[
+	Wires spawn placement and lobby guard behavior for all players.
+]]
 function LobbyService:KnitStart()
 	SpawnService = Knit.GetService("SpawnService")
 

@@ -22,10 +22,17 @@ local MapService = Knit.CreateService({
 local votes: { [number]: string } = {}
 local isVoting = false
 
+--[[
+	Returns the list of configured maps for UI rendering.
+]]
 function MapService.Client:GetMaps(_players: Player)
 	return MapRegistry.getMaps()
 end
 
+--[[
+	Records the caller's vote when voting is active.
+	Ignores invalid map ids to keep vote state canonical.
+]]
 function MapService.Client:VoteMap(player: Player, mapId: string)
 	if not isVoting then
 		return
@@ -39,15 +46,25 @@ function MapService.Client:VoteMap(player: Player, mapId: string)
 	votes[player.UserId] = mapId
 end
 
+--[[
+	Starts a new voting window and clears stale vote data.
+]]
 function MapService:StartVoting()
 	isVoting = true
 	votes = {}
 end
 
+--[[
+	Closes the voting window; existing votes remain available for tally.
+]]
 function MapService:EndVoting()
 	isVoting = false
 end
 
+--[[
+	Computes the winning map id from vote counts.
+	Falls back to the first configured map (or DevMap) when no votes exist.
+]]
 function MapService:GetWinningMap(): string
 	local voteCounts: { [string]: number } = {}
 	for _, mapId in pairs(votes) do

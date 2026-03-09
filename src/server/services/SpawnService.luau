@@ -33,6 +33,9 @@ local SpawnService = Knit.CreateService({
 local playerInRound: { [number]: boolean } = {}
 local currentMapId = "DevMap"
 
+--[[
+	Resolves and validates the player's HumanoidRootPart for teleport operations.
+]]
 local function getHumanoidRootPart(player: Player): (BasePart?, string?)
 	local character = player.Character
 	if not character then
@@ -45,6 +48,10 @@ local function getHumanoidRootPart(player: Player): (BasePart?, string?)
 	return humanoidRootPart, nil
 end
 
+--[[
+	Returns spawn points for the currently selected map.
+	Falls back to a safe default when registry data is unavailable.
+]]
 local function getSpawnPointsForCurrentMap(): { CFrame }
 	local mapData = MapRegistry.Maps[currentMapId]
 	if mapData and mapData.spawnPoints and #mapData.spawnPoints > 0 then
@@ -54,32 +61,45 @@ local function getSpawnPointsForCurrentMap(): { CFrame }
 	return { CFrame.new(0, 5, 0) }
 end
 
--- Returns 1 if player is in round, 0 otherwise (used by LobbyService for spawn placement)
+--[[
+	Returns 1 if the player is currently marked as in-round; otherwise returns 0.
+]]
 function SpawnService:IsPlayerInRound(player: Player): number
     local inRound = playerInRound[player.UserId] == true
     return inRound and 1 or 0
 end
 
--- RoundService calls this after map vote; sets which map spawns use
+--[[
+	Sets the active map id used for subsequent spawn placement.
+]]
 function SpawnService:SetCurrentMap(mapId: string)
     currentMapId = mapId
 end
 
+--[[
+	Returns the active map id used by spawn logic.
+]]
 function SpawnService:GetCurrentMap(): string
     return currentMapId
 end
 
--- Remove player from round tracking (e.g. on leave)
+--[[
+	Clears the in-round flag for a single player.
+]]
 function SpawnService:CleanPlayerFromRound(player: Player)
     playerInRound[player.UserId] = nil
 end
 
--- Clear all players from round (e.g. round end, teleport to lobby)
+--[[
+	Clears all in-round tracking state (used at round transitions).
+]]
 function SpawnService:ClearAllFromRound()
     playerInRound = {}
 end
 
--- Teleport to random spawn point on current map. Only when round is InProgress.
+--[[
+	Places a player at a random spawn on the active map when round is in progress.
+]]
 function SpawnService:RequestSpawn(player: Player): (boolean, string?)
 	local roundState = RoundService:GetRoundState()
 	if roundState ~= "InProgress" then
@@ -101,7 +121,9 @@ function SpawnService:RequestSpawn(player: Player): (boolean, string?)
 	return true, nil
 end
 
--- Teleport to first spawn point (used after map vote / deploy to round)
+--[[
+	Places a player at the primary spawn point for round deployment.
+]]
 function SpawnService:DeployToGame(player: Player): (boolean, string?)
 	local humanoidRootPart, err = getHumanoidRootPart(player)
 	if not humanoidRootPart then
@@ -114,7 +136,9 @@ function SpawnService:DeployToGame(player: Player): (boolean, string?)
 	return true, nil
 end
 
--- Teleport to lobby spawn and remove from round
+--[[
+	Returns a player to lobby spawn and clears in-round tracking.
+]]
 function SpawnService:ReturnToLobby(player: Player): (boolean, string?)
 	local humanoidRootPart, err = getHumanoidRootPart(player)
 	if not humanoidRootPart then
@@ -126,23 +150,37 @@ function SpawnService:ReturnToLobby(player: Player): (boolean, string?)
 	return true, nil
 end
 
+--[[
+	Client RPC proxy for RequestSpawn.
+]]
 function SpawnService.Client:RequestSpawn(player: Player)
     return self.Server:RequestSpawn(player)
 end
 
+--[[
+	Client RPC proxy for DeployToGame.
+]]
 function SpawnService.Client:DeployToGame(player: Player)
     return self.Server:DeployToGame(player)
 end
 
+--[[
+	Client RPC proxy for ReturnToLobby.
+]]
 function SpawnService.Client:ReturnToLobby(player: Player)
     return self.Server:ReturnToLobby(player)
 end
 
+--[[
+	Client RPC proxy for IsPlayerInRound.
+]]
 function SpawnService.Client:IsPlayerInRound(player: Player)
     return self.Server:IsPlayerInRound(player)
 end
 
--- KnitStart: resolve MapService, RoundService; clean up on PlayerRemoving
+--[[
+	Initializes service dependencies and player cleanup hooks.
+]]
 function SpawnService:KnitStart()
 	RoundService = Knit.GetService("RoundService")
 	Players.PlayerRemoving:Connect(function(player)

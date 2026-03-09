@@ -11,6 +11,9 @@ local HookConfig = require(ReplicatedStorage.Core.Config.HookConfig)
 local HookTypes = require(script.Parent.HookTypes)
 type HookData = HookTypes.HookData
 
+--[[
+	Creates the beam instance used to render a hooked rope segment.
+]]
 local function createBeam(
 	playerAttachment: Attachment,
 	targetAttachment: Attachment,
@@ -35,8 +38,10 @@ local function createBeam(
 	return beam
 end
 
--- Updates rope length and beam visual for one hook.
--- Returns direction to anchor for toAnchor accumulation.
+--[[
+	Updates both rope/spring length and beam transform for one hook.
+	Returns normalized direction toward anchor for force accumulation.
+]]
 local function updateRopeAndBeam(
 	hookData: HookData,
 	ropeDelta: number,

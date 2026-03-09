@@ -22,6 +22,9 @@ local maid = Maid.new()
 local speedLinesClone: Instance? = nil
 local template: Model? = nil
 
+--[[
+	Destroys the active speed-lines instance, if present.
+]]
 local function destroySpeedLines()
 	if speedLinesClone then
 		speedLinesClone:Destroy()
@@ -29,6 +32,9 @@ local function destroySpeedLines()
 	end
 end
 
+--[[
+	Resolves the authored SpeedLines template from ReplicatedStorage assets.
+]]
 local function getTemplate(): Model?
 	if template and template.Parent then
 		return template
@@ -49,6 +55,9 @@ local function getTemplate(): Model?
 	return template
 end
 
+--[[
+	Creates a fallback particle effect when authored assets are unavailable.
+]]
 local function createFallbackSpeedLines(): Instance
 	local part = Instance.new("Part")
 	part.Name = "SpeedLinesFallback"
@@ -77,6 +86,9 @@ local function createFallbackSpeedLines(): Instance
 	return part
 end
 
+--[[
+	Returns the first ParticleEmitter found under the given container.
+]]
 local function getParticleEmitter(container: Instance): ParticleEmitter?
 	for _, desc in container:GetDescendants() do
 		if desc:IsA("ParticleEmitter") then
@@ -89,14 +101,23 @@ end
 local showingVFX = false
 local FIRST_PERSON_DIST = 2.5
 
+--[[
+	Returns true when camera is near enough to be treated as first-person.
+]]
 local function isFirstPerson(camera: Camera, hrp: BasePart): boolean
 	return (camera.CFrame.Position - hrp.Position).Magnitude < FIRST_PERSON_DIST
 end
 
+--[[
+	Returns true when humanoid is airborne.
+]]
 local function isInAir(humanoid: Humanoid): boolean
 	return humanoid.FloorMaterial == Enum.Material.Air
 end
 
+--[[
+	Applies hysteresis around speed thresholds to reduce VFX flicker.
+]]
 local function shouldShowSpeedVFX(velocity: Vector3, camera: Camera, hrp: BasePart, humanoid: Humanoid): boolean
 	if not isFirstPerson(camera, hrp) then
 		return false
@@ -118,12 +139,18 @@ local function shouldShowSpeedVFX(velocity: Vector3, camera: Camera, hrp: BasePa
 	return showingVFX
 end
 
+--[[
+	Normalizes current speed into a [0,1] scale factor.
+]]
 local function getScaleFactor(velocityMag: number): number
 	local limitSpeed = HookConfig.SpeedVFXLimitSpeed or 30
 	local maxSpeed = HookConfig.SpeedVFXMaxSpeed or 1000
 	return math.clamp((velocityMag - limitSpeed) / (maxSpeed - limitSpeed), 0, 1)
 end
 
+--[[
+	Applies speed-based scaling to particle size, speed, and lifetime.
+]]
 local function applyScaleToEmitter(emitter: ParticleEmitter, scaleFactor: number)
 	local scaleMin = HookConfig.SpeedVFXScaleMin or 0.5
 	local scaleMax = HookConfig.SpeedVFXScaleMax or 1.5
@@ -138,6 +165,9 @@ local function applyScaleToEmitter(emitter: ParticleEmitter, scaleFactor: number
 	emitter.Lifetime = NumberRange.new(baseLifetime * scale * 0.8, baseLifetime * scale)
 end
 
+--[[
+	Binds render-step updates that create, orient, and scale speed-line VFX.
+]]
 function SpeedVFXController:KnitStart()
 	local player = Players.LocalPlayer
 
@@ -202,6 +232,9 @@ function SpeedVFXController:KnitStart()
 	end))
 end
 
+--[[
+	Destroys speed-line instances and releases runtime subscriptions.
+]]
 function SpeedVFXController:KnitDestroy()
 	destroySpeedLines()
 	maid:DoCleaning()

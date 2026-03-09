@@ -35,12 +35,19 @@ local lastSwingForce: number? = nil
 local lastBoostTime = 0
 local BOOST_DEBOUNCE = 0.12
 
+--[[
+	Returns true when humanoid state is one of the ragdoll-like states that
+	can break grapple flow if not corrected.
+]]
 local function isRagdollState(state: Enum.HumanoidStateType): boolean
 	return state == Enum.HumanoidStateType.Ragdoll
 		or state == Enum.HumanoidStateType.FallingDown
 		or state == Enum.HumanoidStateType.Physics
 end
 
+--[[
+	Computes hook origin from left/right arm offset relative to HumanoidRootPart.
+]]
 local function getArmOrigin(character: Model, hrp: BasePart, isLeft: boolean): Vector3
 	local armPart = character:FindFirstChild(isLeft and "Left Arm" or "Right Arm")
 	if not armPart or not armPart:IsA("BasePart") then
@@ -53,10 +60,17 @@ local function getArmOrigin(character: Model, hrp: BasePart, isLeft: boolean): V
 	return armPart.Position + forward + side
 end
 
+--[[
+	Resolves Knit services required by this controller.
+]]
 function HookController:KnitInit()
     self.HookService = Knit.GetService("HookService")
 end
 
+--[[
+	Attempts to fire a hook on the specified side.
+	Uses projectile mode or direct attach mode based on HookConfig.
+]]
 function HookController:TryHook(isLeft: boolean)
     local player = Players.LocalPlayer
     local character = player.Character
@@ -108,6 +122,9 @@ function HookController:TryHook(isLeft: boolean)
     end
 end
 
+--[[
+	Binds input actions, HUD updates, and heartbeat synchronization for hook state.
+]]
 function HookController:KnitStart()
     local player = Players.LocalPlayer
     local camera = Workspace.CurrentCamera
@@ -287,6 +304,9 @@ function HookController:KnitStart()
     end))
 end
 
+--[[
+	Releases active hooks and disconnects runtime connections.
+]]
 function HookController:KnitDestroy()
     ContextActionService:UnbindAction("HookSpaceAction")
     if hookLeft then

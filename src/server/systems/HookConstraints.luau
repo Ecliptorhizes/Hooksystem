@@ -14,6 +14,9 @@ type HookData = HookTypes.HookData
 
 local sharedWorldAnchor: BasePart? = nil
 
+--[[
+	Returns a hidden world anchor used by LinearVelocity constraints.
+]]
 local function getWorldAnchor(): BasePart
 	if not sharedWorldAnchor or not sharedWorldAnchor.Parent then
 		local part = Instance.new("Part")
@@ -28,7 +31,9 @@ local function getWorldAnchor(): BasePart
 	return sharedWorldAnchor :: BasePart
 end
 
--- Clean up all runtime instances for a single hook attachment.
+--[[
+	Destroys all runtime instances associated with one hook attachment.
+]]
 local function releaseHookData(hookData: HookData)
 	if hookData.ArmForce then
 		hookData.ArmForce:Destroy()
@@ -40,6 +45,9 @@ local function releaseHookData(hookData: HookData)
 	end
 end
 
+--[[
+	Creates the player's attachment at the computed hook origin point.
+]]
 local function createPlayerAttachment(armPart: BasePart, worldPos: Vector3, isLeft: boolean): Attachment
 	local localPos = armPart.CFrame:PointToObjectSpace(worldPos)
 	local attachment = Instance.new("Attachment")
@@ -49,6 +57,9 @@ local function createPlayerAttachment(armPart: BasePart, worldPos: Vector3, isLe
 	return attachment
 end
 
+--[[
+	Creates the target attachment at the raycast hit point.
+]]
 local function createTargetAttachment(targetPart: BasePart, hitPosition: Vector3): Attachment
 	local attachment = Instance.new("Attachment")
 	attachment.Name = "HookTarget"
@@ -57,6 +68,9 @@ local function createTargetAttachment(targetPart: BasePart, hitPosition: Vector3
 	return attachment
 end
 
+--[[
+	Creates either RopeConstraint or SpringConstraint depending on HookConfig.
+]]
 local function createConstraint(
 	playerAttachment: Attachment,
 	targetAttachment: Attachment,
@@ -86,6 +100,9 @@ local function createConstraint(
 	end
 end
 
+--[[
+	Creates optional arm VectorForce used by arm-force hook mode.
+]]
 local function createArmForce(playerAttachment: Attachment, isLeft: boolean): VectorForce?
 	if not HookConfig.UseArmForce then
 		return nil
@@ -100,7 +117,9 @@ local function createArmForce(playerAttachment: Attachment, isLeft: boolean): Ve
 	return vectorForce
 end
 
--- Creates velocity mover (VectorForce or LinearVelocity) for non-ArmForce mode.
+--[[
+	Creates velocity mover (VectorForce or LinearVelocity) when arm-force mode is disabled.
+]]
 local function createVelocityMover(humanoidRootPart: BasePart, velocityAttachment: Attachment?): Instance?
 	if HookConfig.UseArmForce then
 		return nil
@@ -136,7 +155,9 @@ local function createVelocityMover(humanoidRootPart: BasePart, velocityAttachmen
 	return nil
 end
 
--- Creates gravity reduction force when GravityScaleWhenHooked is set.
+--[[
+	Creates optional gravity-reduction force while player is hooked.
+]]
 local function createGravityReduction(humanoidRootPart: BasePart): (VectorForce?, Attachment?)
 	local scale = HookConfig.GravityScaleWhenHooked
 	if not scale or scale >= 1 or scale <= 0 then

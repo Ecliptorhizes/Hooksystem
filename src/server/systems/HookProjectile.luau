@@ -9,11 +9,17 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HookConfig = require(ReplicatedStorage.Core.Config.HookConfig)
 
+--[[
+	Returns left/right arm part when available.
+]]
 local function getArmPart(character: Model, isLeft: boolean): BasePart?
 	local part = character:FindFirstChild(isLeft and "Left Arm" or "Right Arm")
 	return part and part:IsA("BasePart") and part or nil
 end
 
+--[[
+	Computes world-space hook origin offset from HumanoidRootPart orientation.
+]]
 local function getHookOriginWorldPos(armPart: BasePart, humanoidRootPart: BasePart, isLeft: boolean): Vector3
 	local look = humanoidRootPart.CFrame.LookVector
 	local right = humanoidRootPart.CFrame.RightVector
@@ -22,8 +28,10 @@ local function getHookOriginWorldPos(armPart: BasePart, humanoidRootPart: BasePa
 	return armPart.Position + forward + side
 end
 
--- Fire projectile: raycast each frame until hit, cancel, or max range.
--- onAttach: (player, targetPart, hitPosition, isLeft) -> (boolean, string?)
+--[[
+	Advances a hook projectile each frame until hit, cancel, or max range is reached.
+	onAttach callback is executed on a valid hit and returns (success, errMessage).
+]]
 local function fireProjectile(
 	player: Player,
 	origin: Vector3,

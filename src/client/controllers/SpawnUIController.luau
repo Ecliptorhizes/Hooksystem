@@ -15,6 +15,9 @@ local SpawnUIController = Knit.CreateController({
 })
 local maid = Maid.new()
 
+--[[
+	Finds or creates the MainLobby screen used for deploy UI flow.
+]]
 local function ensureMainLobbyGui(playerGui: PlayerGui): ScreenGui
 	local mainLobby = playerGui:FindFirstChild("MainLobby")
 	if mainLobby and mainLobby:IsA("ScreenGui") then
@@ -60,6 +63,9 @@ local function ensureMainLobbyGui(playerGui: PlayerGui): ScreenGui
 	return fallback
 end
 
+--[[
+	Sets visibility for ScreenGui / GuiObject / GuiButton consistently.
+]]
 local function setGuiVisible(gui: Instance, visible: boolean)
 	if gui:IsA("ScreenGui") then
 		gui.Enabled = visible
@@ -75,6 +81,9 @@ local function setGuiVisible(gui: Instance, visible: boolean)
 	end
 end
 
+--[[
+	Binds deploy, spawn, and return UI interactions to server services.
+]]
 function SpawnUIController:KnitStart()
 	local roundService = Knit.GetService("RoundService")
 	local spawnService = Knit.GetService("SpawnService")
@@ -171,6 +180,9 @@ function SpawnUIController:KnitStart()
 	end
 end
 
+--[[
+	Cleans up UI polling loops and button event connections.
+]]
 function SpawnUIController:KnitDestroy()
 	maid:DoCleaning()
 end
