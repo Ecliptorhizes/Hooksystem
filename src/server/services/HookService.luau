@@ -1,10 +1,67 @@
+--[[
+	HookService
+	============================================================================
+	Grappling hook movement system for Roblox. Manages hook mechanics, validates
+	requests, coordinates subsystems, and maintains per-player hook state.
+
+	Responsibilities:
+	• Handle remote events from client (RequestHook, RequestFireHook, ReleaseHook, etc.)
+	• Validate hook targets (range, gas, character)
+	• Coordinate HookConstraints, HookVisual, HookProjectile, HookPhysics, HookGas
+	• Maintain player hook state (left/right hooks, velocity mover, ragdoll prevention)
+
+	Client Flow:
+	• Client → RequestHook(targetPart, hitPosition, isLeft) — direct attach at hit
+	• Client → RequestFireHook(origin, direction, isLeft) — projectile phase, raycast until hit
+	• Client → ReleaseHook(isLeft) — detach one hook
+	• Client → RequestJump(isLeft) — jump while hooked (reel or boost based on angle)
+	• Client → RequestBoost(isLeft) — add impulse toward anchor
+	• Client → SetReelForce(force), SetSwingForce(force) — input for reel/swing
+	• Client → GetGas() — current gas amount
+
+	Server Flow:
+	1. Validate: character, HumanoidRootPart, target, range, gas
+	2. Spend gas (HookGas)
+	3. Release existing hook if re-attaching same side
+	4. Create attachments (HookConstraints)
+	5. Create rope/spring constraint (HookConstraints)
+	6. Create beam visual (HookVisual)
+	7. Create optional arm VectorForce (HookConstraints)
+	8. Initialize player state (velocity mover, gravity reduction, ragdoll prevention)
+	9. Apply initial launch impulse or pendulum kick (HookPhysics)
+	10. Connect PreSimulation: rope/beam update, velocity, arm force
+	11. Connect PostSimulation: ragdoll recovery, pendulum nudge
+
+	Physics Processing (PreSimulation each frame):
+	• Update rope length from reel input
+	• Update beam visuals (HookVisual.updateRopeAndBeam)
+	• Compute swing velocity (HookPhysics: grapple or pendulum mode)
+	• Apply arm force (HookPhysics.updateArmForce) when UseArmForce
+	• Apply velocity via LinearVelocity/VectorForce or AssemblyLinearVelocity
+
+	Gas Consumption:
+	• HookCost on fire, BoostCost on boost, JumpCost on jump
+	• Regen when not hooked (HookGas.regenGas in Heartbeat)
+	============================================================================
+]]
+
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local HookConfig = require(ReplicatedStorage.Core.Config.HookConfig)
+
+local systems = script.Parent.Parent.systems
+local HookConstraints = require(systems.HookConstraints)
+local HookVisual = require(systems.HookVisual)
+local HookProjectile = require(systems.HookProjectile)
+local HookPhysics = require(systems.HookPhysics)
+local HookGas = require(systems.HookGas)
+local HookTypes = require(systems.HookTypes)
+
+type HookData = HookTypes.HookData
+type PlayerHookState = HookTypes.PlayerHookState
 
 local HookService = Knit.CreateService({
 	Name = "HookService",
@@ -20,708 +77,326 @@ local HookService = Knit.CreateService({
 	},
 })
 
--- Data for a single attached hook (left or right)
-type HookData = {
-	Constraint: RopeConstraint | SpringConstraint,
-	BeamPart: BasePart,
-	Attachments: { Attachment },
-	PlayerAtt: Attachment,
-	TargetAtt: Attachment,
-	ArmForce: VectorForce?,
-	AttachTime: number?,
-}
-
--- Per-player state: both hooks, velocity mover, ragdoll prevention, etc.
-type PlayerHookState = {
-	left: HookData?,
-	right: HookData?,
-	LinearVelocity: LinearVelocity?,
-	VelocityAttachment: Attachment,
-	GravityForce: VectorForce?,
-	GravityAttachment: Attachment?,
-	LastTick: number,
-	JumpBoostEndTime: number?,
-	ReelEndTime: number?,
-	LastBoostTime: number?,
-	HeartbeatConn: RBXScriptConnection,
-	RagdollPreventionConn: RBXScriptConnection?,
-	RagdollPostSimConn: RBXScriptConnection?,
-	LimbCollisionBackup: { { part: BasePart, canCollide: boolean } }?,
-}
-
 local playerHooks: { [number]: PlayerHookState? } = {}
-local playerGas: { [number]: number } = {}
-local sharedWorldAnchor: BasePart? = nil
-
--- World anchor for LinearVelocity when UseVelocityConstraints: used as Attachment1 reference
-local function getWorldAnchor(): BasePart
-	if not sharedWorldAnchor or not sharedWorldAnchor.Parent then
-		local p = Instance.new("Part")
-		p.Name = "HookVelWorldAnchor"
-		p.Anchored = true
-		p.CanCollide = false
-		p.Size = Vector3.new(0.1, 0.1, 0.1)
-		p.Transparency = 1
-		p.Parent = Workspace
-		sharedWorldAnchor = p
-	end
-	return sharedWorldAnchor :: BasePart
-end
 local playerProjectileCancel: { [number]: { left: boolean, right: boolean } } = {}
 local playerReelForce: { [number]: number } = {}
 local playerSwingForce: { [number]: number } = {}
 
--- Gas: get current, spend (returns false if insufficient), regen over time
-local function getGas(player: Player): number
-	if not playerGas[player.UserId] then
-		playerGas[player.UserId] = HookConfig.MaxGas
-	end
-	return playerGas[player.UserId]
-end
-
-local function spendGas(player: Player, amount: number): boolean
-	local gas = getGas(player)
-	if gas < amount then
-		return false
-	end
-	playerGas[player.UserId] = gas - amount
-	return true
-end
-
-local function regenGas(player: Player, delta: number)
-	local gas = getGas(player)
-	if gas >= HookConfig.MaxGas then
-		return
-	end
-	playerGas[player.UserId] = math.min(HookConfig.MaxGas, gas + HookConfig.GasRegenPerSec * delta)
-end
-
--- Clean up constraint, beam, attachments, arm force for one hook
-local function releaseHookData(data: HookData)
-	if data.ArmForce then
-		data.ArmForce:Destroy()
-	end
-	data.Constraint:Destroy()
-	data.BeamPart:Destroy()
-	for _, att in data.Attachments do
-		att:Destroy()
-	end
-end
-
 local function getArmPart(character: Model, isLeft: boolean): BasePart?
-	local part = character:FindFirstChild(isLeft and "Left Arm" or "Right Arm")
-	return part and part:IsA("BasePart") and part or nil
+	return HookProjectile.getArmPart(character, isLeft)
 end
 
--- Rotate vector `from` toward `to` by at most `maxRad` radians (used for reel angle)
-local function rotateTowards(from: Vector3, to: Vector3, maxRad: number): Vector3
-	local fromMag = from.Magnitude
-	if fromMag < 0.0001 then
-		return to.Unit
-	end
-	local fromNorm = from.Unit
-	local toNorm = to.Unit
-	local dot = math.clamp(fromNorm:Dot(toNorm), -1, 1)
-	local angle = math.acos(dot)
-	local rotateBy = math.min(angle, maxRad)
-	if rotateBy < 0.0001 then
-		return fromNorm
-	end
-	local axis = fromNorm:Cross(toNorm)
-	if axis.Magnitude < 0.0001 then
-		return toNorm
-	end
-	return (CFrame.fromAxisAngle(axis.Unit, rotateBy) * fromNorm).Unit
+local function getHookOriginWorldPos(armPart: BasePart, humanoidRootPart: BasePart, isLeft: boolean): Vector3
+	return HookProjectile.getHookOriginWorldPos(armPart, humanoidRootPart, isLeft)
 end
 
-local UP = Vector3.new(0, 1, 0)
-
-local function isRagdollState(st: Enum.HumanoidStateType): boolean
-	return st == Enum.HumanoidStateType.Ragdoll
-		or st == Enum.HumanoidStateType.FallingDown
-		or st == Enum.HumanoidStateType.Physics
-end
-
-local function getHookOriginWorldPos(armPart: BasePart, hrp: BasePart, isLeft: boolean): Vector3
-	local look = hrp.CFrame.LookVector
-	local right = hrp.CFrame.RightVector
-	local forward = look * (HookConfig.HookArmForwardOffset or 1.2)
-	local side = right * ((HookConfig.HookArmSideOffset or 0.4) * (isLeft and -1 or 1))
-	return armPart.Position + forward + side
-end
-
--- Updates rope length and beam visual for one hook; returns direction to anchor for toAnchor accumulation
-local function updateRopeAndBeam(
-	data: HookData,
-	ropeDelta: number,
-	sway: number,
-	hrp: BasePart,
-	beamThickness: number,
-	maxRange: number
-): Vector3
-	local originPos = data.PlayerAtt.WorldPosition
-	local anchorPos = data.TargetAtt.WorldPosition
-	local toDir = (anchorPos - hrp.Position).Unit
-	local currentLen = data.Constraint:IsA("SpringConstraint") and data.Constraint.FreeLength
-		or (data.Constraint :: RopeConstraint).Length
-	local anchorDist = (anchorPos - originPos).Magnitude
-	local maxLen = math.min(maxRange, anchorDist + 50)
-	local newLen = ropeDelta >= 0 and math.max(5, currentLen - ropeDelta)
-		or math.min(maxLen, currentLen - ropeDelta)
-	if data.Constraint:IsA("SpringConstraint") then
-		data.Constraint.FreeLength = newLen
-	else
-		(data.Constraint :: RopeConstraint).Length = newLen
-	end
-	local len = (anchorPos - originPos).Magnitude
-	data.BeamPart.Size = Vector3.new(beamThickness, len, beamThickness)
-	local baseCF = CFrame.lookAt(originPos, anchorPos) * CFrame.Angles(-math.rad(90), 0, 0)
-	data.BeamPart.CFrame = (baseCF * CFrame.Angles(sway, sway * 0.5, 0))
-	data.BeamPart.Position = (originPos + anchorPos) / 2
-	return toDir
-end
-
--- Core attach logic: create Rope/SpringConstraint, beam Part, attachments, arm force; set up heartbeat physics
+-- Core attach: create constraint, beam, attachments; set up heartbeat physics.
 local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vector3, isLeft: boolean): (boolean, string?)
-	local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-	if not hrp then
+	local humanoidRootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then
 		return false, "No character"
 	end
 
 	local key = isLeft and "left" or "right"
-	local armPart = getArmPart(player.Character :: Model, isLeft)
-	local state = playerHooks[player.UserId]
-	if state and state[key] then
-		releaseHookData(state[key])
-		state[key] = nil
+	local armPart = getArmPart(player.Character :: Model, isLeft) or humanoidRootPart
+	local playerState = playerHooks[player.UserId]
+	if playerState and playerState[key] then
+		HookConstraints.releaseHookData(playerState[key])
+		playerState[key] = nil
 	end
 
-	armPart = armPart or hrp
-	local worldPos = getHookOriginWorldPos(armPart, hrp, isLeft)
-	local localPos = armPart.CFrame:PointToObjectSpace(worldPos)
+	local worldPos = getHookOriginWorldPos(armPart, humanoidRootPart, isLeft)
+	local playerAttachment = HookConstraints.createPlayerAttachment(armPart, worldPos, isLeft)
+	local targetAttachment = HookConstraints.createTargetAttachment(targetPart, hitPosition)
+	local distance = (hitPosition - playerAttachment.WorldPosition).Magnitude
 
-	local playerAtt = Instance.new("Attachment")
-	playerAtt.Name = "HookAttachment_" .. (isLeft and "Left" or "Right")
-	playerAtt.Position = localPos
-	playerAtt.Parent = armPart
-
-	local distance = (hitPosition - playerAtt.WorldPosition).Magnitude
-
-	local targetAtt = Instance.new("Attachment")
-	targetAtt.Name = "HookTarget"
-	targetAtt.Position = targetPart.CFrame:PointToObjectSpace(hitPosition)
-	targetAtt.Parent = targetPart
-
-	-- Create RopeConstraint or SpringConstraint between player attachment and target
-	local constraint: RopeConstraint | SpringConstraint
-	if HookConfig.UseSpringConstraint then
-		local spring = Instance.new("SpringConstraint")
-		spring.Name = "PlayerHook_" .. (isLeft and "Left" or "Right")
-		spring.Attachment0 = playerAtt
-		spring.Attachment1 = targetAtt
-		spring.Stiffness = HookConfig.SpringStiffness
-		spring.Damping = HookConfig.SpringDamping
-		spring.FreeLength = distance
-		spring.Parent = Workspace
-		constraint = spring
-	else
-		local rope = Instance.new("RopeConstraint")
-		rope.Name = "PlayerHook_" .. (isLeft and "Left" or "Right")
-		rope.Attachment0 = playerAtt
-		rope.Attachment1 = targetAtt
-		rope.Length = distance
-		rope.Visible = false
-		rope.Parent = Workspace
-		constraint = rope
-	end
-
-	-- Visual beam Part (anchored, neon) between player and anchor
-	local beam = Instance.new("Part")
-	beam.Name = "HookBeam_" .. (isLeft and "Left" or "Right")
-	beam.Anchored = true
-	beam.CanCollide = false
-	beam.CanQuery = false
-	beam.CanTouch = false
-	beam.Material = Enum.Material.Neon
-	beam.Color = isLeft and Color3.fromRGB(100, 200, 255) or Color3.fromRGB(255, 180, 100)
-	beam.Size = Vector3.new(HookConfig.BeamThickness, distance, HookConfig.BeamThickness)
-	local originPos = playerAtt.WorldPosition
-	beam.CFrame = CFrame.lookAt(originPos, targetAtt.WorldPosition) * CFrame.Angles(-math.rad(90), 0, 0)
-	beam.Position = (originPos + targetAtt.WorldPosition) / 2
-	beam.Parent = Workspace
-
-	-- Optional VectorForce on arm for pendulum-style pull (UseArmForce mode)
-	local armForce: VectorForce? = nil
-	if HookConfig.UseArmForce then
-		local vf = Instance.new("VectorForce")
-		vf.Name = "HookArmForce_" .. (isLeft and "Left" or "Right")
-		vf.ApplyAtCenterOfMass = false
-		vf.Force = Vector3.zero
-		vf.RelativeTo = Enum.ActuatorRelativeTo.World
-		vf.Attachment0 = playerAtt
-		vf.Parent = playerAtt.Parent
-		armForce = vf
-	end
+	local constraint = HookConstraints.createConstraint(playerAttachment, targetAttachment, distance, isLeft)
+	local beam = HookVisual.createBeam(playerAttachment, targetAttachment, distance, isLeft)
+	local armForce = HookConstraints.createArmForce(playerAttachment, isLeft)
 
 	local hookData: HookData = {
 		Constraint = constraint,
 		BeamPart = beam,
-		Attachments = { playerAtt, targetAtt },
-		PlayerAtt = playerAtt,
-		TargetAtt = targetAtt,
+		Attachments = { playerAttachment, targetAttachment },
+		PlayerAtt = playerAttachment,
+		TargetAtt = targetAttachment,
 		ArmForce = armForce,
 		AttachTime = tick(),
 	}
 
-	-- First hook for this player: create velocity mover (VectorForce or LinearVelocity), gravity reduction, state
-	if not state then
-		local velAtt = (not HookConfig.UseArmForce) and Instance.new("Attachment") or nil
-		if velAtt then
-			velAtt.Name = "HookVelocityAttachment"
-			velAtt.Parent = hrp
+	-- First hook: create velocity mover, gravity reduction, state.
+	if not playerState then
+		local velocityAttachment = (not HookConfig.UseArmForce) and Instance.new("Attachment") or nil
+		if velocityAttachment then
+			velocityAttachment.Name = "HookVelocityAttachment"
+			velocityAttachment.Parent = humanoidRootPart
 		end
-
-		local mover = nil
-		if not HookConfig.UseArmForce then
-			if HookConfig.UseVectorForce then
-				local vf = Instance.new("VectorForce")
-				vf.ApplyAtCenterOfMass = true
-				vf.Force = Vector3.zero
-				vf.RelativeTo = Enum.ActuatorRelativeTo.World
-				vf.Attachment0 = velAtt
-				vf.Parent = hrp
-				mover = vf
-			elseif HookConfig.UseVelocityConstraints then
-				local worldPart = getWorldAnchor()
-				local worldAtt = worldPart:FindFirstChild("HookVelAtt")
-				if not worldAtt then
-					worldAtt = Instance.new("Attachment")
-					worldAtt.Name = "HookVelAtt"
-					worldAtt.Parent = worldPart
-				end
-				local linVel = Instance.new("LinearVelocity")
-				linVel.Attachment0 = velAtt
-				linVel.Attachment1 = worldAtt
-				linVel.MaxForce = math.huge
-				linVel.VectorVelocity = Vector3.zero
-				linVel.RelativeTo = Enum.ActuatorRelativeTo.World
-				linVel.Parent = hrp
-				mover = linVel
-			end
-		end
-
-		local gravityForce: VectorForce? = nil
-		local gravityAtt: Attachment? = nil
-		local scale = HookConfig.GravityScaleWhenHooked
-		if scale and scale < 1 and scale > 0 then
-			local gAtt = Instance.new("Attachment")
-			gAtt.Name = "HookGravityAttachment"
-			gAtt.Parent = hrp
-			gravityAtt = gAtt
-			local vf = Instance.new("VectorForce")
-			vf.Name = "HookGravityReduce"
-			vf.ApplyAtCenterOfMass = true
-			vf.RelativeTo = Enum.ActuatorRelativeTo.World
-			vf.Attachment0 = gAtt
-			local gravity = Workspace.Gravity
-			local mass = hrp.AssemblyMass
-			vf.Force = Vector3.new(0, mass * gravity * (1 - scale), 0)
-			vf.Parent = hrp
-			gravityForce = vf
-		end
-
-		state = {
+		local mover = HookConstraints.createVelocityMover(humanoidRootPart, velocityAttachment)
+		local gravityForce, gravityAttachment = HookConstraints.createGravityReduction(humanoidRootPart)
+		playerState = {
 			left = nil,
 			right = nil,
 			LinearVelocity = mover,
-			VelocityAttachment = velAtt,
+			VelocityAttachment = velocityAttachment,
 			GravityForce = gravityForce,
-			GravityAttachment = gravityAtt,
+			GravityAttachment = gravityAttachment,
 			LastTick = tick(),
 			JumpBoostEndTime = nil,
 			ReelEndTime = nil,
 			LastBoostTime = nil :: number?,
 			HeartbeatConn = nil :: any,
 		}
-		playerHooks[player.UserId] = state
+		playerHooks[player.UserId] = playerState
 	end
+	playerState[key] = hookData
 
-	state[key] = hookData
-
-	-- Ragdoll prevention: disable ragdoll/falling, reconnect StateChanged to force PlatformStanding if triggered
-	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-	if hum then
-		hum.PlatformStand = false
-		hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
-		hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-		hum:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
-		if state.RagdollPreventionConn then
-			state.RagdollPreventionConn:Disconnect()
+	-- Ragdoll prevention: disable ragdoll/falling, force PlatformStanding if triggered.
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.PlatformStand = false
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
+		if playerState.RagdollPreventionConn then
+			playerState.RagdollPreventionConn:Disconnect()
 		end
-		state.RagdollPreventionConn = hum.StateChanged:Connect(function(_old, new)
-			if isRagdollState(new) then
+		playerState.RagdollPreventionConn = humanoid.StateChanged:Connect(function(_old, new)
+			if HookPhysics.isRagdollState(new) then
 				task.defer(function()
-					if hum and hum.Parent then
-						hum:ChangeState(Enum.HumanoidStateType.PlatformStanding)
+					if humanoid and humanoid.Parent then
+						humanoid:ChangeState(Enum.HumanoidStateType.PlatformStanding)
 					end
 				end)
 			end
 		end)
 		if HookConfig.DisableLimbCollisionWhenHooked and player.Character then
-			state.LimbCollisionBackup = {}
+			playerState.LimbCollisionBackup = {}
 			for _, desc in player.Character:GetDescendants() do
-				if desc:IsA("BasePart") and desc ~= hrp then
-					table.insert(state.LimbCollisionBackup, { part = desc, canCollide = desc.CanCollide })
+				if desc:IsA("BasePart") and desc ~= humanoidRootPart then
+					table.insert(playerState.LimbCollisionBackup, { part = desc, canCollide = desc.CanCollide })
 					desc.CanCollide = false
 				end
 			end
 		end
 	end
-	-- Initial launch impulse when NoAutoPull is false (instant pull toward target)
+
+	-- Initial impulse: launch toward target or pendulum kick.
 	if not HookConfig.NoAutoPull and not HookConfig.UseArmForce then
-		do
-			local mult = HookConfig.LaunchForceMultiplier or 12
-			local minY = HookConfig.LaunchVerticalMin or 15
-			local toTarget = (hitPosition - hrp.Position).Unit * mult
-			if toTarget.Y < minY then
-				toTarget = toTarget + Vector3.new(0, math.min(minY - toTarget.Y, 20), 0)
-			end
-			if hitPosition.Y >= hrp.Position.Y then
-				local extraY = math.min((hitPosition.Y - hrp.Position.Y) * 0.5, 25)
-				toTarget = toTarget + Vector3.new(0, extraY, 0)
-			end
-			local currentVel = hrp.AssemblyLinearVelocity
-			local newVel = currentVel + toTarget
-			local cap = HookConfig.LaunchVelocityCap or 150
-			if newVel.Magnitude > cap then
-				newVel = newVel.Unit * cap
-			end
-			local upwardCap = HookConfig.LaunchUpwardCap or 35
-			if newVel.Y > upwardCap then
-				newVel = Vector3.new(newVel.X, upwardCap, newVel.Z)
-			end
-			local downwardCap = HookConfig.LaunchDownwardCap or 80
-			if newVel.Y < -downwardCap then
-				newVel = Vector3.new(newVel.X, -downwardCap, newVel.Z)
-			end
-			hrp.AssemblyLinearVelocity = newVel
-		end
-	else
-		if HookConfig.UseArmForce then
-			local toTarget = (hitPosition - hrp.Position).Unit
-			local tangent = toTarget:Cross(UP)
-			if tangent.Magnitude > 0.01 then
-				tangent = tangent.Unit
-				local kick = HookConfig.PendulumKickSpeed or 18
-				local vel = hrp.AssemblyLinearVelocity
-				if vel.Magnitude < kick * 0.5 then
-					hrp.AssemblyLinearVelocity = vel + tangent * kick
-				end
-			end
-		end
+		HookPhysics.applyLaunchImpulse(humanoidRootPart, hitPosition)
+	elseif HookConfig.UseArmForce then
+		HookPhysics.applyPendulumKick(humanoidRootPart, hitPosition)
 	end
 
-	-- PreSimulation: rope length, beam update, velocity, arm force; PostSimulation: ragdoll recovery, pendulum nudge
-	if not state.HeartbeatConn then
-		state.RagdollPostSimConn = RunService.PostSimulation:Connect(function()
-			local s = playerHooks[player.UserId]
-			if not s or not player.Character or not s.left and not s.right then
+	-- PreSimulation: rope/beam, velocity; PostSimulation: ragdoll recovery, pendulum nudge.
+	if not playerState.HeartbeatConn then
+		playerState.RagdollPostSimConn = RunService.PostSimulation:Connect(function()
+			local state = playerHooks[player.UserId]
+			if not state or not player.Character or (not state.left and not state.right) then
 				return
 			end
 			local hum = player.Character:FindFirstChildOfClass("Humanoid")
-			local hrp2 = player.Character:FindFirstChild("HumanoidRootPart")
-			if hum and hrp2 and isRagdollState(hum:GetState()) then
+			local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+			if hum and hrp and HookPhysics.isRagdollState(hum:GetState()) then
 				hum:ChangeState(Enum.HumanoidStateType.PlatformStanding)
 			end
 			if HookConfig.UseArmForce then
-				local leftData = s.left
-				local rightData = s.right
-				local boostWindow = (s.LastBoostTime and (tick() - s.LastBoostTime) < 0.6)
-				local swingVal = playerSwingForce[player.UserId] or 0
-				local vel = hrp2.AssemblyLinearVelocity
-				local velMag = vel.Magnitude
-				if not boostWindow and swingVal == 0 and velMag < (HookConfig.PendulumNudgeVelThreshold or 10) then
-					local firstData = leftData or rightData
-					if firstData then
-						local toTarget = (firstData.TargetAtt.WorldPosition - firstData.PlayerAtt.WorldPosition).Unit
-						local tangent = toTarget:Cross(UP)
-						if tangent.Magnitude > 0.01 then
-							tangent = tangent.Unit
-							local nudgeSpeed = HookConfig.PendulumNudgeSpeed or 22
-							hrp2.AssemblyLinearVelocity = tangent * nudgeSpeed
-						end
-					end
+				local firstData = state.left or state.right
+				if firstData then
+					local boostWindow = state.LastBoostTime and (tick() - state.LastBoostTime) < 0.6
+					local swingVal = playerSwingForce[player.UserId] or 0
+					local rootVel = hrp.AssemblyLinearVelocity
+					HookPhysics.applyPendulumNudge(hrp, firstData, boostWindow, swingVal, rootVel.Magnitude)
 				end
 			end
 		end)
-		state.HeartbeatConn = RunService.PreSimulation:Connect(function()
-			local s = playerHooks[player.UserId]
-			if not s or not player.Character or hrp.Parent ~= player.Character then
-				if s then
-					if s.HeartbeatConn then
-						s.HeartbeatConn:Disconnect()
+		playerState.HeartbeatConn = RunService.PreSimulation:Connect(function()
+			local state = playerHooks[player.UserId]
+			if not state or not player.Character or humanoidRootPart.Parent ~= player.Character then
+				if state then
+					if state.HeartbeatConn then
+						state.HeartbeatConn:Disconnect()
 					end
-					if s.RagdollPostSimConn then
-						s.RagdollPostSimConn:Disconnect()
+					if state.RagdollPostSimConn then
+						state.RagdollPostSimConn:Disconnect()
 					end
 				end
 				return
 			end
-			local leftData = s.left
-			local rightData = s.right
+			local leftData = state.left
+			local rightData = state.right
 			if not leftData and not rightData then
 				return
 			end
 			local hum = player.Character:FindFirstChildOfClass("Humanoid")
-			if hum and isRagdollState(hum:GetState()) then
+			if hum and HookPhysics.isRagdollState(hum:GetState()) then
 				hum:ChangeState(Enum.HumanoidStateType.PlatformStanding)
 			end
 			local velCap = HookConfig.MaxVelocityWhileHooked
 			if velCap and velCap > 0 then
-				local vel = hrp.AssemblyLinearVelocity
-				if vel.Magnitude > velCap then
-					hrp.AssemblyLinearVelocity = vel.Unit * velCap
+				local rootVel = humanoidRootPart.AssemblyLinearVelocity
+				if rootVel.Magnitude > velCap then
+					humanoidRootPart.AssemblyLinearVelocity = rootVel.Unit * velCap
 				end
 			end
-			-- Void kill: below VoidFloorY, release hooks and dampen velocity
+			-- Void kill: below VoidFloorY, release all hooks and dampen velocity.
+			-- Prevents players from falling infinitely; applies horizontal dampening and caps downward speed.
 			local voidFloor = HookConfig.VoidFloorY or -350
-			if hrp.Position.Y < voidFloor then
+			if humanoidRootPart.Position.Y < voidFloor then
 				if leftData then
-					releaseHookData(leftData)
-					s.left = nil
+					HookConstraints.releaseHookData(leftData)
+					state.left = nil
 				end
 				if rightData then
-					releaseHookData(rightData)
-					s.right = nil
+					HookConstraints.releaseHookData(rightData)
+					state.right = nil
 				end
-				hrp.AssemblyLinearVelocity = Vector3.new(
-					hrp.AssemblyLinearVelocity.X * 0.3,
-					math.max(hrp.AssemblyLinearVelocity.Y, -60),
-					hrp.AssemblyLinearVelocity.Z * 0.3
+				humanoidRootPart.AssemblyLinearVelocity = Vector3.new(
+					humanoidRootPart.AssemblyLinearVelocity.X * 0.3,
+					math.max(humanoidRootPart.AssemblyLinearVelocity.Y, -60),
+					humanoidRootPart.AssemblyLinearVelocity.Z * 0.3
 				)
-				if s.HeartbeatConn then
-					s.HeartbeatConn:Disconnect()
-					s.HeartbeatConn = nil
+				if state.HeartbeatConn then
+					state.HeartbeatConn:Disconnect()
+					state.HeartbeatConn = nil
 				end
-				if s.RagdollPostSimConn then
-					s.RagdollPostSimConn:Disconnect()
-					s.RagdollPostSimConn = nil
+				if state.RagdollPostSimConn then
+					state.RagdollPostSimConn:Disconnect()
+					state.RagdollPostSimConn = nil
 				end
 				return
 			end
 
 			local now = tick()
-			local delta = now - (s.LastTick or now)
-			s.LastTick = now
+			local delta = now - (state.LastTick or now)
+			state.LastTick = now
 
-			-- Cache config for this frame
-			local cfg = {
-				BeamThickness = HookConfig.BeamThickness,
-				MaxRange = HookConfig.MaxRange,
-				RopeSwayFrequency = HookConfig.RopeSwayFrequency,
-				RopeSwayAmplitude = HookConfig.RopeSwayAmplitude,
-				PullForceDual = HookConfig.PullForceDual,
-				PullForceSingle = HookConfig.PullForceSingle,
-				ReelInPullForce = HookConfig.ReelInPullForce,
-				ReelForceRange = HookConfig.ReelForceRange,
-				RopeShortenSpeed = HookConfig.RopeShortenSpeed or 28,
-				RopeExtendSpeed = HookConfig.RopeExtendSpeed or 22,
-				RopeReelInMultiplier = HookConfig.RopeReelInMultiplier or 1.0,
-			}
+			local rootVelocity = humanoidRootPart.AssemblyLinearVelocity
+			local velocityMag = rootVelocity.Magnitude
+			local sway = math.sin(now * HookConfig.RopeSwayFrequency)
+				* HookConfig.RopeSwayAmplitude
+				* (1 + velocityMag * 0.01)
+			local pullForce = (leftData and rightData) and HookConfig.PullForceDual or HookConfig.PullForceSingle
+			local reelInPull = HookConfig.ReelInPullForce or pullForce
+			local reelForceVal = math.clamp(
+				playerReelForce[player.UserId] or 0,
+				-HookConfig.ReelForceRange,
+				HookConfig.ReelForceRange
+			)
+			local boostWindow = state.LastBoostTime and (now - state.LastBoostTime) < 0.6
+			-- Rope length change: positive = shorten (reel in), negative = extend.
+			local ropeDelta = HookPhysics.computeRopeDelta(reelForceVal, delta)
 
-			local velocity = hrp.AssemblyLinearVelocity
-			local velocityMag = velocity.Magnitude
-			local sway = math.sin(now * cfg.RopeSwayFrequency) * cfg.RopeSwayAmplitude * (1 + velocityMag * 0.01)
-			local pullForce = (leftData and rightData) and cfg.PullForceDual or cfg.PullForceSingle
-			local reelInPull = cfg.ReelInPullForce or pullForce
-			local reelForceVal = math.clamp(playerReelForce[player.UserId] or 0, -cfg.ReelForceRange, cfg.ReelForceRange)
-			local boostWindow = (s.LastBoostTime and (now - s.LastBoostTime) < 0.6)
-
-			local ropeDelta = 0
-			if reelForceVal > 0 then
-				ropeDelta = cfg.RopeShortenSpeed * cfg.RopeReelInMultiplier * delta
-			elseif reelForceVal < 0 then
-				ropeDelta = -cfg.RopeExtendSpeed * delta
-			end
-
+			-- Accumulate direction to anchor from each hook for velocity and orientation.
 			local toAnchor = Vector3.zero
 			if leftData then
-				toAnchor = toAnchor + updateRopeAndBeam(leftData, ropeDelta, sway, hrp, cfg.BeamThickness, cfg.MaxRange)
+				toAnchor = toAnchor
+					+ HookVisual.updateRopeAndBeam(
+						leftData,
+						ropeDelta,
+						sway,
+						humanoidRootPart,
+						HookConfig.BeamThickness,
+						HookConfig.MaxRange
+					)
 			end
 			if rightData then
-				toAnchor = toAnchor + updateRopeAndBeam(rightData, ropeDelta, sway, hrp, cfg.BeamThickness, cfg.MaxRange)
+				toAnchor = toAnchor
+					+ HookVisual.updateRopeAndBeam(
+						rightData,
+						ropeDelta,
+						sway,
+						humanoidRootPart,
+						HookConfig.BeamThickness,
+						HookConfig.MaxRange
+					)
 			end
 
 			local goalPos = (leftData and rightData)
 					and ((leftData.TargetAtt.WorldPosition + rightData.TargetAtt.WorldPosition) / 2)
 				or (leftData and leftData.TargetAtt.WorldPosition or rightData.TargetAtt.WorldPosition)
 			if (not HookConfig.UseArmForce) and HookConfig.OrientToAnchor and toAnchor.Magnitude > 0.01 then
-				local targetCF = CFrame.lookAt(hrp.Position, goalPos)
-				hrp.CFrame = hrp.CFrame:Lerp(targetCF, math.min(1, HookConfig.OrientLerpSpeed * delta))
+				local targetCF = CFrame.lookAt(humanoidRootPart.Position, goalPos)
+				humanoidRootPart.CFrame = humanoidRootPart.CFrame:Lerp(
+					targetCF,
+					math.min(1, HookConfig.OrientLerpSpeed * delta)
+				)
 			end
 
 			local dir = toAnchor.Unit
 			local swingVal = playerSwingForce[player.UserId] or 0
-			local distToGoal = (goalPos - hrp.Position).Magnitude
-			local stopNearDist = HookConfig.StopNearAnchorDist or 2
-			-- UseGrapplePhysics: direct velocity toward anchor. Else: pendulum-style with momentum.
-			local baseVel: Vector3
+			local distToGoal = (goalPos - humanoidRootPart.Position).Magnitude
+			local hasDualHooks = leftData and rightData
+
+			local baseVel: Vector3?
 			if HookConfig.UseGrapplePhysics then
-				local grappleSpeed = (leftData and rightData) and (HookConfig.GrappleSpeedDual or 300)
-					or (HookConfig.GrappleSpeedSingle or 150)
-				local multiplier = 1
-				if reelForceVal > 0 then
-					multiplier = HookConfig.ReelInSpeedMultiplier or 2.2
-				elseif reelForceVal < 0 then
-					baseVel = velocity * (HookConfig.NoAutoPullVelocityRetention or 0.98)
-					multiplier = 0
-				end
-				local orbitVelocity = Vector3.zero
-				if swingVal ~= 0 and multiplier > 0 then
-					local orbitAngle = (HookConfig.OrbitAngleRad or (math.pi / 2.4)) * -swingVal
-					local orbitDir = (CFrame.lookAt(hrp.Position, goalPos) * CFrame.Angles(0, orbitAngle, 0)).LookVector
-					orbitVelocity = orbitDir * (HookConfig.OrbitSpeed or 110)
-				end
-				if multiplier > 0 then
-					if distToGoal < stopNearDist then
-						baseVel = Vector3.zero
-					else
-						baseVel = dir * (grappleSpeed * multiplier) + orbitVelocity
-						if boostWindow then
-							baseVel = baseVel + (hrp.CFrame.LookVector * (HookConfig.GasBoostAdd or 150))
-						end
-					end
-				end
+				baseVel = HookPhysics.computeGrappleVelocity(
+					humanoidRootPart,
+					goalPos,
+					dir,
+					distToGoal,
+					hasDualHooks,
+					reelForceVal,
+					swingVal,
+					boostWindow,
+					rootVelocity
+				)
 				if
 					not HookConfig.UseArmForce
 					and (HookConfig.OrientToGoal or HookConfig.OrientToAnchor)
 					and dir.Magnitude > 0.01
 				then
-					local targetCF = CFrame.lookAt(hrp.Position, goalPos)
-					hrp.CFrame = hrp.CFrame:Lerp(targetCF, math.min(1, (HookConfig.OrientLerpSpeed or 12) * delta))
+					local targetCF = CFrame.lookAt(humanoidRootPart.Position, goalPos)
+					humanoidRootPart.CFrame = humanoidRootPart.CFrame:Lerp(
+						targetCF,
+						math.min(1, (HookConfig.OrientLerpSpeed or 12) * delta)
+					)
 				end
 			else
-				local momentumAlong = dir * (velocity:Dot(dir))
-				local reelAngle = HookConfig.ReelAngleRad * (1 + reelForceVal)
-				local velMagForAngle = velocity.Magnitude
-				local angleToDir = (velMagForAngle >= 0.1)
-						and math.deg(math.acos(math.clamp(velocity.Unit:Dot(dir), -1, 1)))
-					or 0
-				local canReel = (angleToDir > 90) and (s.ReelEndTime and now < s.ReelEndTime)
-				if canReel and velMagForAngle >= 0.1 then
-					local speed = velocityMag + (HookConfig.ReelSpeedRetention or 0.1)
-					baseVel = rotateTowards(velocity, dir, reelAngle) * speed
-				elseif HookConfig.NoAutoPull and reelForceVal <= 0 then
-					s.ReelEndTime = nil
-					s.JumpBoostEndTime = nil
-					baseVel = velocity * (HookConfig.NoAutoPullVelocityRetention or 0.98)
-					if boostWindow then
-						baseVel = baseVel + dir * ((HookConfig.BoostThrustForce or 140) * delta)
-					end
-				elseif reelForceVal > 0 then
-					s.ReelEndTime = nil
-					s.JumpBoostEndTime = nil
-					baseVel = dir * reelInPull + momentumAlong * HookConfig.VelocityScaleMultiplier
-				else
-					s.ReelEndTime = nil
-					if s.JumpBoostEndTime and now < s.JumpBoostEndTime then
-						baseVel = dir * pullForce
-							+ momentumAlong * HookConfig.VelocityScaleMultiplier
-							+ Vector3.new(0, HookConfig.JumpForce, 0)
-					else
-						s.JumpBoostEndTime = nil
-						baseVel = dir * pullForce + momentumAlong * HookConfig.VelocityScaleMultiplier
-					end
-				end
-				if swingVal ~= 0 then
-					local right = dir:Cross(UP).Unit
-					if right.Magnitude < 0.01 then
-						right = hrp.CFrame.RightVector
-					end
-					baseVel = baseVel + right * (swingVal * (HookConfig.SwingForce or 15))
-				end
-				local momentum = HookConfig.PendulumMomentum or 0.6
-				if boostWindow then
-					momentum = HookConfig.BoostPendulumMomentum or 0.35
-				elseif reelForceVal > 0 then
-					momentum = HookConfig.ReelPendulumMomentum or 0.4
-				end
-				baseVel = velocity * momentum + baseVel * (1 - momentum)
+				baseVel = HookPhysics.computePendulumVelocity(
+					dir,
+					rootVelocity,
+					velocityMag,
+					reelForceVal,
+					swingVal,
+					boostWindow,
+					state,
+					now,
+					delta,
+					pullForce,
+					reelInPull,
+					humanoidRootPart
+				)
 			end
 
-			-- UseArmForce: apply VectorForce on arm attachment toward target (pendulum feel)
 			if HookConfig.UseArmForce then
-				local function updateArmForce(data: HookData)
-					if not data.ArmForce then
-						return
-					end
-					local toTarget = (data.TargetAtt.WorldPosition - data.PlayerAtt.WorldPosition).Unit
-					local mag = 0
-					if HookConfig.NoAutoPull then
-						if boostWindow then
-							mag = HookConfig.ArmPullForce or 3500
-							local rampSec = HookConfig.ArmForceRampUpSec or 0.4
-							local elapsed = now - (data.AttachTime or now)
-							local ramp = rampSec > 0 and math.min(1, elapsed / rampSec) or 1
-							mag = mag * ramp
-						end
-					else
-						mag = HookConfig.ArmPullForce or 3500
-						if reelForceVal > 0 then
-							mag = HookConfig.ArmReelForce or 7000
-						end
-						local rampSec = HookConfig.ArmForceRampUpSec or 0.4
-						local elapsed = now - (data.AttachTime or now)
-						local ramp = rampSec > 0 and math.min(1, elapsed / rampSec) or 1
-						mag = mag * ramp
-					end
-					local force = toTarget * mag
-					if boostWindow then
-						force = force + (hrp.CFrame.LookVector * (HookConfig.ArmBoostForce or 100))
-					end
-					local swingVal = playerSwingForce[player.UserId] or 0
-					if swingVal ~= 0 then
-						local right = toTarget:Cross(UP).Unit
-						if right.Magnitude < 0.01 then
-							right = hrp.CFrame.RightVector
-						end
-						force = force + right * (swingVal * (HookConfig.SwingForce or 35) * 80)
-					end
-					data.ArmForce.Force = force
-				end
 				if leftData then
-					updateArmForce(leftData)
+					HookPhysics.updateArmForce(leftData, humanoidRootPart, boostWindow, reelForceVal, swingVal, now)
 				end
 				if rightData then
-					updateArmForce(rightData)
+					HookPhysics.updateArmForce(rightData, humanoidRootPart, boostWindow, reelForceVal, swingVal, now)
 				end
 			else
-				local launchCap = HookConfig.LaunchVelocityCap or 400
-				if baseVel.Magnitude > launchCap then
-					baseVel = baseVel.Unit * launchCap
-				end
-				local downwardCap = HookConfig.PullDownwardCap or 60
-				if baseVel.Y < -downwardCap then
-					baseVel = Vector3.new(baseVel.X, -downwardCap, baseVel.Z)
+				if baseVel then
+					baseVel = HookPhysics.applyVelocityCaps(baseVel)
 				end
 				if state.LinearVelocity then
 					if state.LinearVelocity:IsA("VectorForce") then
 						local mag = HookConfig.VectorForceMagnitude or 12000
-						local targetSpeed = (leftData and rightData) and (HookConfig.GrappleSpeedDual or 300)
+						local targetSpeed = hasDualHooks and (HookConfig.GrappleSpeedDual or 300)
 							or (HookConfig.GrappleSpeedSingle or 150)
 						if boostWindow then
 							targetSpeed = targetSpeed + (HookConfig.GasBoostAdd or 150)
 						end
-						if velocityMag < targetSpeed * 0.95 and baseVel.Magnitude > 0.01 then
+						if velocityMag < targetSpeed * 0.95 and baseVel and baseVel.Magnitude > 0.01 then
 							state.LinearVelocity.Force = baseVel.Unit * mag
 						else
 							state.LinearVelocity.Force = Vector3.zero
 						end
 					else
-						state.LinearVelocity.VectorVelocity = baseVel
+						state.LinearVelocity.VectorVelocity = baseVel or Vector3.zero
 					end
 				end
-				hrp.AssemblyLinearVelocity = baseVel
+				humanoidRootPart.AssemblyLinearVelocity = baseVel or Vector3.zero
 			end
 		end)
 	end
@@ -729,7 +404,6 @@ local function doAttach(player: Player, targetPart: BasePart, hitPosition: Vecto
 	return true, nil
 end
 
--- Client calls this with raycast hit (targetPart, hitPosition). Validates range, gas, then attaches.
 function HookService:RequestHook(
 	player: Player,
 	targetPart: BasePart,
@@ -739,33 +413,30 @@ function HookService:RequestHook(
 	if not player.Character then
 		return false, "No character"
 	end
-	local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-	if not hrp then
+	local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then
 		return false, "No HumanoidRootPart"
 	end
 	if not targetPart or not targetPart:IsA("BasePart") then
 		return false, "Invalid target"
 	end
-	local armPart = getArmPart(player.Character, isLeft) or hrp
-	local armOrigin = getHookOriginWorldPos(armPart, hrp, isLeft)
+	local armPart = getArmPart(player.Character, isLeft) or humanoidRootPart
+	local armOrigin = getHookOriginWorldPos(armPart, humanoidRootPart, isLeft)
 	local distance = (hitPosition - armOrigin).Magnitude
 	if distance > HookConfig.MaxRange then
 		return false, "Too far"
 	end
-	if not spendGas(player, HookConfig.HookCost) then
+	if not HookGas.spendGas(player, HookConfig.HookCost) then
 		return false, "Out of gas"
 	end
-
 	local key = isLeft and "left" or "right"
-	local state = playerHooks[player.UserId]
-	if state and state[key] then
+	local playerState = playerHooks[player.UserId]
+	if playerState and playerState[key] then
 		self:ReleaseHook(player, isLeft)
 	end
-
 	return doAttach(player, targetPart, hitPosition, isLeft)
 end
 
--- Projectile phase: fire hook from origin in direction, raycast each frame until hit or max range
 function HookService:RequestFireHook(
 	player: Player,
 	origin: Vector3,
@@ -775,17 +446,16 @@ function HookService:RequestFireHook(
 	if not player.Character then
 		return false, "No character"
 	end
-	local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-	if not hrp then
+	local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then
 		return false, "No HumanoidRootPart"
 	end
-	local dir = direction.Unit
-	if not spendGas(player, HookConfig.HookCost) then
+	if not HookGas.spendGas(player, HookConfig.HookCost) then
 		return false, "Out of gas"
 	end
 	local key = isLeft and "left" or "right"
-	local state = playerHooks[player.UserId]
-	if state and state[key] then
+	local playerState = playerHooks[player.UserId]
+	if playerState and playerState[key] then
 		self:ReleaseHook(player, isLeft)
 	end
 	local cancel = playerProjectileCancel[player.UserId]
@@ -795,174 +465,95 @@ function HookService:RequestFireHook(
 	end
 	cancel[key] = false
 
-	-- Projectile loop: move pos each frame, raycast for hit; cancel if ReleaseHook called
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { player.Character }
-
-	local pos = origin
-	local startPos = origin
-	local lastTick = tick()
-	local result = Instance.new("BindableEvent")
-	local conn: RBXScriptConnection?
-	local projectileBeam = Instance.new("Part")
-	projectileBeam.Name = "HookProjectile_" .. (isLeft and "L" or "R")
-	projectileBeam.Anchored = true
-	projectileBeam.CanCollide = false
-	projectileBeam.CanQuery = false
-	projectileBeam.CanTouch = false
-	projectileBeam.Material = Enum.Material.Neon
-	projectileBeam.Color = isLeft and Color3.fromRGB(100, 200, 255) or Color3.fromRGB(255, 180, 100)
-	projectileBeam.Size = Vector3.new(HookConfig.BeamThickness, 1, HookConfig.BeamThickness)
-	projectileBeam.Transparency = 0.3
-	projectileBeam.Parent = Workspace
-
-	conn = RunService.Heartbeat:Connect(function()
-		local cancel = playerProjectileCancel[player.UserId]
-		if cancel and cancel[key] then
-			if conn then
-				conn:Disconnect()
-			end
-			projectileBeam:Destroy()
-			result:Fire(false, "Cancelled")
-			return
-		end
-		if not player.Character or not hrp.Parent then
-			if conn then
-				conn:Disconnect()
-			end
-			projectileBeam:Destroy()
-			result:Fire(false, "Character lost")
-			return
-		end
-		local now = tick()
-		local delta = now - lastTick
-		lastTick = now
-		local step = dir * HookConfig.ProjectileSpeed * delta
-		local newPos = pos + step
-		local rayResult = Workspace:Raycast(pos, step, params)
-		if rayResult then
-			if conn then
-				conn:Disconnect()
-			end
-			projectileBeam:Destroy()
-			local dist = (rayResult.Position - startPos).Magnitude
-			if dist <= HookConfig.MaxRange and rayResult.Instance:IsA("BasePart") then
-				local ok, err = doAttach(player, rayResult.Instance, rayResult.Position, isLeft)
-				result:Fire(ok, err)
-			else
-				result:Fire(false, "Invalid hit")
-			end
-			return
-		end
-		pos = newPos
-		local armPart = getArmPart(player.Character, isLeft) or hrp
-		local beamStart = getHookOriginWorldPos(armPart, hrp, isLeft)
-		local beamDir = pos - beamStart
-		local len = beamDir.Magnitude
-		if len > 0.1 then
-			beamDir = beamDir / len
-			projectileBeam.Size = Vector3.new(HookConfig.BeamThickness, len, HookConfig.BeamThickness)
-			local right = Vector3.new(-beamDir.Z, 0, beamDir.X)
-			if right.Magnitude < 0.01 then
-				right = Vector3.new(1, 0, 0)
-			end
-			projectileBeam.CFrame = CFrame.fromMatrix((beamStart + pos) / 2, right.Unit, beamDir)
-			projectileBeam.Parent = Workspace
-		end
-
-		if (pos - startPos).Magnitude > HookConfig.MaxRange then
-			if conn then
-				conn:Disconnect()
-			end
-			projectileBeam:Destroy()
-			result:Fire(false, "Too far")
-		end
-	end)
-
-	local ok, err = result.Event:Wait()
-	result:Destroy()
-	return ok, err
+	local cancelCheck = function()
+		local c = playerProjectileCancel[player.UserId]
+		return c and c[key]
+	end
+	local onAttach = function(targetPart: BasePart, hitPosition: Vector3)
+		return doAttach(player, targetPart, hitPosition, isLeft)
+	end
+	return HookProjectile.fireProjectile(
+		player,
+		origin,
+		direction,
+		isLeft,
+		humanoidRootPart,
+		cancelCheck,
+		onAttach
+	)
 end
 
--- Jump while hooked: angle > 90° = reel in; else = boost toward anchor. Costs JumpCost gas.
 function HookService:RequestJump(player: Player, isLeft: boolean): boolean
-	local state = playerHooks[player.UserId]
-	if not state or not player.Character then
+	local playerState = playerHooks[player.UserId]
+	if not playerState or not player.Character then
 		return false
 	end
-	if not (state.left or state.right) then
+	if not (playerState.left or playerState.right) then
 		return false
 	end
-	if not spendGas(player, HookConfig.JumpCost) then
+	if not HookGas.spendGas(player, HookConfig.JumpCost) then
 		return false
 	end
-
-	local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-	if not hrp then
+	local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then
 		return false
 	end
-
 	local toAnchor = Vector3.zero
-	if state.left then
-		toAnchor = toAnchor + (state.left.TargetAtt.WorldPosition - hrp.Position).Unit
+	if playerState.left then
+		toAnchor = toAnchor + (playerState.left.TargetAtt.WorldPosition - humanoidRootPart.Position).Unit
 	end
-	if state.right then
-		toAnchor = toAnchor + (state.right.TargetAtt.WorldPosition - hrp.Position).Unit
+	if playerState.right then
+		toAnchor = toAnchor + (playerState.right.TargetAtt.WorldPosition - humanoidRootPart.Position).Unit
 	end
 	local dir = toAnchor.Unit
-	local velocity = hrp.AssemblyLinearVelocity
+	local velocity = humanoidRootPart.AssemblyLinearVelocity
 	local velMag = velocity.Magnitude
 	local angleToDir = (velMag >= 0.1) and math.deg(math.acos(math.clamp(velocity.Unit:Dot(dir), -1, 1))) or 0
-
 	if angleToDir > 90 then
-		state.ReelEndTime = tick() + 0.2
+		playerState.ReelEndTime = tick() + 0.2
 	else
-		state.JumpBoostEndTime = tick() + 0.2
+		playerState.JumpBoostEndTime = tick() + 0.2
 	end
 	return true
 end
 
--- Boost: add impulse toward anchor. Costs BoostCost gas. Sets LastBoostTime for boost window.
 function HookService:RequestBoost(player: Player, isLeft: boolean): boolean
-	local state = playerHooks[player.UserId]
-	if not state or not player.Character then
+	local playerState = playerHooks[player.UserId]
+	if not playerState or not player.Character then
 		return false
 	end
-	local leftData = state.left
-	local rightData = state.right
+	local leftData = playerState.left
+	local rightData = playerState.right
 	if not leftData and not rightData then
 		return false
 	end
-	if not spendGas(player, HookConfig.BoostCost) then
+	if not HookGas.spendGas(player, HookConfig.BoostCost) then
 		return false
 	end
-
-	local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-	if not hrp then
+	local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then
 		return false
 	end
-
-	state.LastBoostTime = tick()
+	playerState.LastBoostTime = tick()
 	if HookConfig.UseArmForce then
 		return true
 	end
 	local toAnchor = Vector3.zero
 	if leftData then
-		toAnchor = toAnchor + (leftData.TargetAtt.WorldPosition - hrp.Position).Unit
+		toAnchor = toAnchor + (leftData.TargetAtt.WorldPosition - humanoidRootPart.Position).Unit
 	end
 	if rightData then
-		toAnchor = toAnchor + (rightData.TargetAtt.WorldPosition - hrp.Position).Unit
+		toAnchor = toAnchor + (rightData.TargetAtt.WorldPosition - humanoidRootPart.Position).Unit
 	end
 	local dir = toAnchor.Unit
-	local velocity = hrp.AssemblyLinearVelocity
+	local velocity = humanoidRootPart.AssemblyLinearVelocity
 	local momentumAlong = dir * (velocity:Dot(dir))
 	local impulse = dir * HookConfig.JumpBoostForce + momentumAlong * HookConfig.MomentumRetention
 	local currentVel = (
-		state.LinearVelocity
-		and state.LinearVelocity:IsA("LinearVelocity")
-		and state.LinearVelocity.VectorVelocity
-	) or hrp.AssemblyLinearVelocity
+		playerState.LinearVelocity
+		and playerState.LinearVelocity:IsA("LinearVelocity")
+		and playerState.LinearVelocity.VectorVelocity
+	) or humanoidRootPart.AssemblyLinearVelocity
 	local newVel = currentVel + impulse
 	local velCap = HookConfig.LaunchVelocityCap or 400
 	if newVel.Magnitude > velCap then
@@ -975,14 +566,13 @@ function HookService:RequestBoost(player: Player, isLeft: boolean): boolean
 	elseif newVel.Y > upwardCap then
 		newVel = Vector3.new(newVel.X, upwardCap, newVel.Z)
 	end
-	if state.LinearVelocity and state.LinearVelocity:IsA("LinearVelocity") then
-		state.LinearVelocity.VectorVelocity = newVel
+	if playerState.LinearVelocity and playerState.LinearVelocity:IsA("LinearVelocity") then
+		playerState.LinearVelocity.VectorVelocity = newVel
 	end
-	hrp.AssemblyLinearVelocity = newVel
+	humanoidRootPart.AssemblyLinearVelocity = newVel
 	return true
 end
 
--- Release one hook. If both released, clean up state, restore ragdoll, apply ReleaseVelocityRetention.
 function HookService:ReleaseHook(player: Player, isLeft: boolean)
 	local key = isLeft and "left" or "right"
 	local cancel = playerProjectileCancel[player.UserId]
@@ -992,62 +582,61 @@ function HookService:ReleaseHook(player: Player, isLeft: boolean)
 	end
 	cancel[key] = true
 
-	local state = playerHooks[player.UserId]
-	if not state then
+	local playerState = playerHooks[player.UserId]
+	if not playerState then
 		return
 	end
-
-	local data = state[key]
-	if data then
-		releaseHookData(data)
-		state[key] = nil
+	local hookData = playerState[key]
+	if hookData then
+		HookConstraints.releaseHookData(hookData)
+		playerState[key] = nil
 	end
 
-	if not state.left and not state.right then
-		local hrp0 = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-		if hrp0 then
-			local ret = HookConfig.ReleaseVelocityRetention or 1
-			if ret < 1 then
-				local v = hrp0.AssemblyLinearVelocity
-				hrp0.AssemblyLinearVelocity = v * ret
+	if not playerState.left and not playerState.right then
+		local humanoidRootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		if humanoidRootPart then
+			local retention = HookConfig.ReleaseVelocityRetention or 1
+			if retention < 1 then
+				local rootVel = humanoidRootPart.AssemblyLinearVelocity
+				humanoidRootPart.AssemblyLinearVelocity = rootVel * retention
 			end
 		end
-		if state.HeartbeatConn then
-			state.HeartbeatConn:Disconnect()
+		if playerState.HeartbeatConn then
+			playerState.HeartbeatConn:Disconnect()
 		end
-		if state.RagdollPostSimConn then
-			state.RagdollPostSimConn:Disconnect()
+		if playerState.RagdollPostSimConn then
+			playerState.RagdollPostSimConn:Disconnect()
 		end
-		if state.LinearVelocity then
-			state.LinearVelocity:Destroy()
+		if playerState.LinearVelocity then
+			playerState.LinearVelocity:Destroy()
 		end
-		if state.VelocityAttachment then
-			state.VelocityAttachment:Destroy()
+		if playerState.VelocityAttachment then
+			playerState.VelocityAttachment:Destroy()
 		end
-		if state.GravityForce then
-			state.GravityForce:Destroy()
+		if playerState.GravityForce then
+			playerState.GravityForce:Destroy()
 		end
-		if state.GravityAttachment then
-			state.GravityAttachment:Destroy()
+		if playerState.GravityAttachment then
+			playerState.GravityAttachment:Destroy()
 		end
-		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-		if hum then
-			hum.PlatformStand = false
-			hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
-			hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-			hum:SetStateEnabled(Enum.HumanoidStateType.Physics, true)
+		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.PlatformStand = false
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.Physics, true)
 		end
-		if state.RagdollPreventionConn then
-			state.RagdollPreventionConn:Disconnect()
-			state.RagdollPreventionConn = nil
+		if playerState.RagdollPreventionConn then
+			playerState.RagdollPreventionConn:Disconnect()
+			playerState.RagdollPreventionConn = nil
 		end
-		if state.LimbCollisionBackup then
-			for _, entry in state.LimbCollisionBackup do
+		if playerState.LimbCollisionBackup then
+			for _, entry in playerState.LimbCollisionBackup do
 				if entry.part and entry.part.Parent then
 					entry.part.CanCollide = entry.canCollide
 				end
 			end
-			state.LimbCollisionBackup = nil
+			playerState.LimbCollisionBackup = nil
 		end
 		playerHooks[player.UserId] = nil
 		playerReelForce[player.UserId] = nil
@@ -1056,8 +645,7 @@ function HookService:ReleaseHook(player: Player, isLeft: boolean)
 end
 
 function HookService:SetSwingForce(player: Player, force: number)
-	local clamped = math.clamp(force, -1, 1)
-	playerSwingForce[player.UserId] = clamped
+	playerSwingForce[player.UserId] = math.clamp(force, -1, 1)
 end
 
 function HookService.Client:SetSwingForce(player: Player, force: number)
@@ -1085,7 +673,7 @@ function HookService.Client:RequestBoost(player: Player, isLeft: boolean)
 end
 
 function HookService:GetGas(player: Player): number
-	return getGas(player)
+	return HookGas.getGas(player)
 end
 
 function HookService:SetReelForce(player: Player, force: number)
@@ -1101,43 +689,44 @@ function HookService.Client:GetGas(player: Player)
 end
 
 function HookService:GetDebugData(player: Player): { [string]: any }
-	local state = playerHooks[player.UserId]
-	local gas = getGas(player)
+	local playerState = playerHooks[player.UserId]
+	local gas = HookGas.getGas(player)
 	local leftLen, rightLen = nil, nil
 	local distToAnchor, toTargetX, toTargetY, toTargetZ = nil, nil, nil, nil
 	local pullForce, grappleSpeed, pendulumMomentum, gravityScale = nil, nil, nil, nil
-	if state then
-		if state.left and state.left.Constraint then
-			leftLen = state.left.Constraint:IsA("SpringConstraint") and state.left.Constraint.FreeLength
-				or (state.left.Constraint :: RopeConstraint).Length
+	if playerState then
+		if playerState.left and playerState.left.Constraint then
+			leftLen = playerState.left.Constraint:IsA("SpringConstraint") and playerState.left.Constraint.FreeLength
+				or (playerState.left.Constraint :: RopeConstraint).Length
 		end
-		if state.right and state.right.Constraint then
-			rightLen = state.right.Constraint:IsA("SpringConstraint") and state.right.Constraint.FreeLength
-				or (state.right.Constraint :: RopeConstraint).Length
+		if playerState.right and playerState.right.Constraint then
+			rightLen = playerState.right.Constraint:IsA("SpringConstraint") and playerState.right.Constraint.FreeLength
+				or (playerState.right.Constraint :: RopeConstraint).Length
 		end
 	end
 	local function isHookActive(data)
 		return data and data.Constraint and data.Constraint.Parent ~= nil
 	end
-	local hasLeft = state and isHookActive(state.left)
-	local hasRight = state and isHookActive(state.right)
+	local hasLeft = playerState and isHookActive(playerState.left)
+	local hasRight = playerState and isHookActive(playerState.right)
 	if (hasLeft or hasRight) and player.Character then
-		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-		if hrp and hrp:IsA("BasePart") then
-			local pos = hrp.Position
+		local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+		if humanoidRootPart and humanoidRootPart:IsA("BasePart") then
+			local pos = humanoidRootPart.Position
 			local goalPos
 			if hasLeft and hasRight then
-				goalPos = (state.left.TargetAtt.WorldPosition + state.right.TargetAtt.WorldPosition) / 2
+				goalPos = (playerState.left.TargetAtt.WorldPosition + playerState.right.TargetAtt.WorldPosition) / 2
 			elseif hasLeft then
-				goalPos = state.left.TargetAtt.WorldPosition
+				goalPos = playerState.left.TargetAtt.WorldPosition
 			else
-				goalPos = state.right.TargetAtt.WorldPosition
+				goalPos = playerState.right.TargetAtt.WorldPosition
 			end
 			local toTarget = (goalPos - pos).Unit
 			distToAnchor = (goalPos - pos).Magnitude
 			toTargetX, toTargetY, toTargetZ = toTarget.X, toTarget.Y, toTarget.Z
 			pullForce = (hasLeft and hasRight) and (HookConfig.PullForceDual or 10) or (HookConfig.PullForceSingle or 20)
-			grappleSpeed = (hasLeft and hasRight) and (HookConfig.GrappleSpeedDual or 300) or (HookConfig.GrappleSpeedSingle or 150)
+			grappleSpeed = (hasLeft and hasRight) and (HookConfig.GrappleSpeedDual or 300)
+				or (HookConfig.GrappleSpeedSingle or 150)
 			pendulumMomentum = HookConfig.PendulumMomentum or 0.6
 			gravityScale = HookConfig.GravityScaleWhenHooked or 0.5
 		end
@@ -1161,35 +750,34 @@ function HookService:GetDebugData(player: Player): { [string]: any }
 	}
 end
 
--- Init: set gas for players, clean up on leave, heartbeat gas regen when not hooked
 function HookService:KnitInit()
 	for _, player in Players:GetPlayers() do
-		playerGas[player.UserId] = HookConfig.MaxGas
+		HookGas.initPlayerGas(player)
 	end
 	Players.PlayerAdded:Connect(function(player)
-		playerGas[player.UserId] = HookConfig.MaxGas
+		HookGas.initPlayerGas(player)
 	end)
 	Players.PlayerRemoving:Connect(function(player)
-		local state = playerHooks[player.UserId]
-		if state then
-			if state.left then
-				releaseHookData(state.left)
+		local playerState = playerHooks[player.UserId]
+		if playerState then
+			if playerState.left then
+				HookConstraints.releaseHookData(playerState.left)
 			end
-			if state.right then
-				releaseHookData(state.right)
+			if playerState.right then
+				HookConstraints.releaseHookData(playerState.right)
 			end
-			if state.HeartbeatConn then
-				state.HeartbeatConn:Disconnect()
+			if playerState.HeartbeatConn then
+				playerState.HeartbeatConn:Disconnect()
 			end
-			if state.LinearVelocity then
-				state.LinearVelocity:Destroy()
+			if playerState.LinearVelocity then
+				playerState.LinearVelocity:Destroy()
 			end
-			if state.VelocityAttachment then
-				state.VelocityAttachment:Destroy()
+			if playerState.VelocityAttachment then
+				playerState.VelocityAttachment:Destroy()
 			end
 		end
 		playerHooks[player.UserId] = nil
-		playerGas[player.UserId] = nil
+		HookGas.clearPlayerGas(player)
 		playerProjectileCancel[player.UserId] = nil
 		playerReelForce[player.UserId] = nil
 		playerSwingForce[player.UserId] = nil
@@ -1197,11 +785,11 @@ function HookService:KnitInit()
 	local lastGasRegenTick = tick()
 	RunService.Heartbeat:Connect(function()
 		local now = tick()
-		local dt = now - lastGasRegenTick
+		local delta = now - lastGasRegenTick
 		lastGasRegenTick = now
 		for _, player in Players:GetPlayers() do
 			if not playerHooks[player.UserId] and player.Character then
-				regenGas(player, dt)
+				HookGas.regenGas(player, delta)
 			end
 		end
 	end)

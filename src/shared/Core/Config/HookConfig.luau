@@ -1,3 +1,9 @@
+--[[
+	HookConfig
+	Central tuning table for hook behavior, gas, movement, and visual effects.
+	Values are consumed by HookService and hook subsystem modules.
+]]
+
 return {
 	DevTuningServerUrl = "http://localhost:34873",
 

@@ -1,3 +1,9 @@
+--[[
+	Client Bootstrap
+	Purpose:
+	Locate controller modules, register them with Knit, and start client runtime.
+]]
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)

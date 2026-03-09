@@ -1,8 +1,13 @@
+--[[
+	RoundTypes
+	Purpose:
+	Declare shared static type contracts for round lifecycle and post-round UI payloads.
+]]
 export type PlayerRoundStats = {
     kills: number,
     deaths: number,
     headshots: number,
-    bestTimeSecond: number,
+    bestTimeSeconds: number,
 }
 
 export type LeaderboardEntry = {

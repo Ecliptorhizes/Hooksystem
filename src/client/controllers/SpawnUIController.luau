@@ -1,3 +1,9 @@
+--[[
+	SpawnUIController
+	Purpose:
+	Manage deploy, spawn, and return UI visibility in sync with server round state.
+]]
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -9,118 +15,128 @@ local SpawnUIController = Knit.CreateController({
 })
 local maid = Maid.new()
 
+local function ensureMainLobbyGui(playerGui: PlayerGui): ScreenGui
+	local mainLobby = playerGui:FindFirstChild("MainLobby")
+	if mainLobby and mainLobby:IsA("ScreenGui") then
+		return mainLobby
+	end
+
+	for _, gui in playerGui:GetChildren() do
+		if gui:IsA("ScreenGui") and gui:FindFirstChild("Deploy", true) then
+			return gui
+		end
+	end
+
+	local fallback = Instance.new("ScreenGui")
+	fallback.Name = "MainLobby"
+	fallback.ResetOnSpawn = false
+	fallback.Parent = playerGui
+
+	local deployFrame = Instance.new("Frame")
+	deployFrame.Name = "Deploy"
+	deployFrame.Size = UDim2.new(0, 200, 0, 60)
+	deployFrame.Position = UDim2.new(0.5, -100, 0.5, -30)
+	deployFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	deployFrame.BorderSizePixel = 0
+	deployFrame.Parent = fallback
+
+	local container = Instance.new("Frame")
+	container.Name = "Frame"
+	container.Size = UDim2.new(1, 0, 1, 0)
+	container.BackgroundTransparency = 1
+	container.Parent = deployFrame
+
+	local deployButton = Instance.new("TextButton")
+	deployButton.Name = "Deploy"
+	deployButton.Size = UDim2.new(1, -20, 1, -20)
+	deployButton.Position = UDim2.new(0, 10, 0, 10)
+	deployButton.Text = "Deploy"
+	deployButton.Font = Enum.Font.GothamBold
+	deployButton.TextSize = 18
+	deployButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+	deployButton.BorderSizePixel = 0
+	deployButton.Parent = container
+
+	return fallback
+end
+
+local function setGuiVisible(gui: Instance, visible: boolean)
+	if gui:IsA("ScreenGui") then
+		gui.Enabled = visible
+		if visible then
+			gui.DisplayOrder = 100
+		end
+	elseif gui:IsA("GuiObject") then
+		gui.Visible = visible
+	end
+
+	if gui:IsA("GuiButton") then
+		gui.Enabled = visible
+	end
+end
+
 function SpawnUIController:KnitStart()
-	local RoundService = Knit.GetService("RoundService")
-	local SpawnService = Knit.GetService("SpawnService")
+	local roundService = Knit.GetService("RoundService")
+	local spawnService = Knit.GetService("SpawnService")
 	local player = Players.LocalPlayer
-	local PlayerGui = player:WaitForChild("PlayerGui")
+	local playerGui = player:WaitForChild("PlayerGui")
+	local mainLobby = ensureMainLobbyGui(playerGui)
 
-	local mainLobby = PlayerGui:WaitForChild("MainLobby", 30)
-	if not mainLobby then
-		for _, gui in PlayerGui:GetChildren() do
-			if gui:IsA("ScreenGui") and gui:FindFirstChild("Deploy", true) then
-				mainLobby = gui
-				break
+	local deployGui = mainLobby:FindFirstChild("Deploy") or mainLobby:FindFirstChild("DeployFrame")
+	local deployFrame = deployGui and (deployGui:FindFirstChild("Frame") or deployGui:WaitForChild("Frame", 5))
+	local deployButton = deployFrame and (deployFrame:FindFirstChild("Deploy") or deployFrame:WaitForChild("Deploy", 5))
+
+	if deployGui and deployFrame and deployButton then
+		local deployInProgress = false
+		local function setDeployVisible(visible: boolean)
+			if visible and deployInProgress then
+				return
+			end
+			setGuiVisible(deployGui, visible)
+			setGuiVisible(mainLobby, visible)
+			if deployFrame:IsA("GuiObject") then
+				deployFrame.Visible = visible
 			end
 		end
-	end
-	if not mainLobby then
-		mainLobby = Instance.new("ScreenGui")
-		mainLobby.Name = "MainLobby"
-		mainLobby.ResetOnSpawn = false
-		mainLobby.Parent = PlayerGui
-		local deployFrame = Instance.new("Frame")
-		deployFrame.Name = "Deploy"
-		deployFrame.Size = UDim2.new(0, 200, 0, 60)
-		deployFrame.Position = UDim2.new(0.5, -100, 0.5, -30)
-		deployFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-		deployFrame.BorderSizePixel = 0
-		deployFrame.Parent = mainLobby
-		local inner = Instance.new("Frame")
-		inner.Name = "Frame"
-		inner.Size = UDim2.new(1, 0, 1, 0)
-		inner.BackgroundTransparency = 1
-		inner.Parent = deployFrame
-		local deployBtn = Instance.new("TextButton")
-		deployBtn.Name = "Deploy"
-		deployBtn.Size = UDim2.new(1, -20, 1, -20)
-		deployBtn.Position = UDim2.new(0, 10, 0, 10)
-		deployBtn.Text = "Deploy"
-		deployBtn.Font = Enum.Font.GothamBold
-		deployBtn.TextSize = 18
-		deployBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-		deployBtn.BorderSizePixel = 0
-		deployBtn.Parent = inner
-	end
-	if mainLobby then
-		local deployGui = mainLobby:FindFirstChild("Deploy") or mainLobby:FindFirstChild("DeployFrame")
-		if deployGui then
-			local frame = deployGui:FindFirstChild("Frame") or deployGui:WaitForChild("Frame", 5)
-			if frame then
-				local deployBtn = frame:FindFirstChild("Deploy") or frame:WaitForChild("Deploy", 5)
-				if deployBtn then
-					local deployInProgress = false
-					local function setDeployVisible(visible: boolean)
-						if visible and deployInProgress then
-							return
-						end
-						if deployGui:IsA("ScreenGui") then
-							deployGui.Enabled = visible
-							if visible then
-								deployGui.DisplayOrder = 100
-							end
-						elseif deployGui:IsA("GuiObject") then
-							deployGui.Visible = visible
-						end
-						if deployGui:IsA("GuiButton") then
-							deployGui.Enabled = visible
-						end
-						if mainLobby:IsA("ScreenGui") then
-							mainLobby.Enabled = visible
-						end
-						if frame and frame:IsA("GuiObject") then
-							frame.Visible = visible
-						end
-					end
 
-					setDeployVisible(true)
+		setDeployVisible(true)
+		maid:GiveTask(deployButton.MouseButton1Click:Connect(function()
+			deployInProgress = true
+			setDeployVisible(false)
+			local success, err = spawnService:DeployToGame():await()
+			if success then
+				return
+			end
+			deployInProgress = false
+			setDeployVisible(true)
+			if err then
+				warn("[SpawnUIController] Deploy failed:", err)
+			end
+		end))
 
-					maid:GiveTask(deployBtn.MouseButton1Click:Connect(function()
-						deployInProgress = true
-						setDeployVisible(false)
-						local success, err = SpawnService:DeployToGame():await()
-						if not success and err then
-							deployInProgress = false
-							setDeployVisible(true)
-							warn("[SpawnUIController] Deploy failed:", err)
-						end
-					end))
+		task.spawn(function()
+			local inRound = (spawnService:IsPlayerInRound():await()) == 1
+			setDeployVisible(not inRound)
+		end)
 
-					task.spawn(function()
-						local inRound = (SpawnService:IsPlayerInRound():await()) == 1
-						setDeployVisible(not inRound)
-					end)
-					maid:GiveTask(task.spawn(function()
-						while true do
-							task.wait(0.25)
-							local inRound = (SpawnService:IsPlayerInRound():await()) == 1
-							if inRound then
-								deployInProgress = false
-							end
-							setDeployVisible(not inRound)
-						end
-					end))
+		maid:GiveTask(task.spawn(function()
+			while true do
+				task.wait(0.25)
+				local inRound = (spawnService:IsPlayerInRound():await()) == 1
+				if inRound then
+					deployInProgress = false
 				end
+				setDeployVisible(not inRound)
 			end
-		end
+		end))
 	end
 
-	local inGame = PlayerGui:FindFirstChild("InGame")
+	local inGame = playerGui:FindFirstChild("InGame")
 	if inGame then
-		local returnBtn = inGame:FindFirstChild("ReturnToLobby", true)
-		if returnBtn and returnBtn:IsA("GuiButton") then
-			maid:GiveTask(returnBtn.MouseButton1Click:Connect(function()
-				local success, err = SpawnService:ReturnToLobby():await()
+		local returnButton = inGame:FindFirstChild("ReturnToLobby", true)
+		if returnButton and returnButton:IsA("GuiButton") then
+			maid:GiveTask(returnButton.MouseButton1Click:Connect(function()
+				local success, err = spawnService:ReturnToLobby():await()
 				if not success and err then
 					warn("[SpawnUIController] Return to lobby failed:", err)
 				end
@@ -128,23 +144,23 @@ function SpawnUIController:KnitStart()
 		end
 	end
 
-	local spawnGui = PlayerGui:FindFirstChild("SpawnGui")
+	local spawnGui = playerGui:FindFirstChild("SpawnGui")
 	if spawnGui then
 		local spawnButton = spawnGui:FindFirstChild("SpawnButton")
-		if spawnButton then
+		if spawnButton and spawnButton:IsA("GuiButton") then
 			spawnGui.Visible = false
 
 			maid:GiveTask(task.spawn(function()
 				while true do
 					task.wait(0.2)
-					local state = RoundService:GetRoundState():await()
-					local inRound = (SpawnService:IsPlayerInRound():await()) == 1
+					local state = roundService:GetRoundState():await()
+					local inRound = (spawnService:IsPlayerInRound():await()) == 1
 					spawnGui.Visible = (state == "InProgress" and not inRound)
 				end
 			end))
 
 			maid:GiveTask(spawnButton.MouseButton1Click:Connect(function()
-				local success, err = SpawnService:RequestSpawn():await()
+				local success, err = spawnService:RequestSpawn():await()
 				if success then
 					spawnGui.Visible = false
 				elseif err then

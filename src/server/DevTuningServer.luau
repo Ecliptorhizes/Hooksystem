@@ -1,7 +1,8 @@
 --[[
-	DevTuningServer - Studio-only bridge to the Node.js tuning dashboard.
-	Polls config from HTTP or Rojo-synced TuningOverrides; POSTs live data (velocity, gas, etc.) to /api/live.
-	Also subscribes to MessagingService for cross-server config sync.
+	DevTuningServer
+	Purpose:
+	Bridge Studio gameplay sessions to the Node-based tuning dashboard.
+	Polls configuration overrides and streams runtime telemetry for live analysis.
 ]]
 
 local RunService = game:GetService("RunService")
@@ -135,19 +136,19 @@ local lastPostTime = 0
 local LIVE_POST_INTERVAL = 0.5
 
 -- Build JSON payload: velocity, position, hook state, gas, DevTuning custom values + schema
-local function buildLivePayload(player, hrp, hookData)
-	local vel = hrp.AssemblyLinearVelocity
-	local pos = hrp.Position
+local function buildLivePayload(humanoidRootPart: BasePart, hookData)
+	local velocity = humanoidRootPart.AssemblyLinearVelocity
+	local position = humanoidRootPart.Position
 	local payload = {
-		velocityMagnitude = vel.Magnitude,
-		velocity = vel.Magnitude,
-		speed = vel.Magnitude,
-		velX = vel.X,
-		velY = vel.Y,
-		velZ = vel.Z,
-		posX = pos.X,
-		posY = pos.Y,
-		posZ = pos.Z,
+		velocityMagnitude = velocity.Magnitude,
+		velocity = velocity.Magnitude,
+		speed = velocity.Magnitude,
+		velX = velocity.X,
+		velY = velocity.Y,
+		velZ = velocity.Z,
+		posX = position.X,
+		posY = position.Y,
+		posZ = position.Z,
 		isHooked = hookData.hasLeft or hookData.hasRight,
 		gas = hookData.gas,
 		reelForce = hookData.reelForce,
@@ -188,7 +189,7 @@ RunService.Heartbeat:Connect(function()
 		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
 		if hrp and hrp:IsA("BasePart") then
 			local hookData = HookService:GetDebugData(player)
-			payload = buildLivePayload(player, hrp, hookData)
+			payload = buildLivePayload(hrp, hookData)
 		end
 	end
 	-- Fallback when no player: still send DevTuning custom values for dashboard

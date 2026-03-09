@@ -1,3 +1,10 @@
+--[[
+	Server Bootstrap
+	Purpose:
+	Discover service modules, register them with Knit, and start the server runtime.
+	In Studio sessions, load DevTuningServer for live diagnostics and tuning workflows.
+]]
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")

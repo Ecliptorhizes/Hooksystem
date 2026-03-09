@@ -1,7 +1,12 @@
 --[[
-	SpawnService - Round spawn placement and lobby return.
-	RequestSpawn: teleport to random map spawn when round is in progress.
-	DeployToGame: teleport to first spawn (e.g. after vote). ReturnToLobby: teleport to lobby.
+	SpawnService
+	Purpose:
+	Coordinate lobby and in-round player spawn placement.
+
+	Responsibilities:
+	- Track whether a player is currently in the active round.
+	- Teleport players to map spawns during round flow.
+	- Return players to lobby spawn when they leave the round.
 ]]
 
 local Players = game:GetService("Players")
@@ -11,7 +16,6 @@ local Knit = require(ReplicatedStorage.Packages.Knit)
 local MapRegistry = require(ReplicatedStorage.Core.MapRegistry)
 local LobbyConfig = require(ReplicatedStorage.Core.Config.LobbyConfig)
 
-local _MapService
 local RoundService
 
 local LOBBY_SPAWN_CFRAME = LobbyConfig.LOBBY_SPAWN_CFRAME
@@ -28,6 +32,27 @@ local SpawnService = Knit.CreateService({
 
 local playerInRound: { [number]: boolean } = {}
 local currentMapId = "DevMap"
+
+local function getHumanoidRootPart(player: Player): (BasePart?, string?)
+	local character = player.Character
+	if not character then
+		return nil, "No character"
+	end
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart or not humanoidRootPart:IsA("BasePart") then
+		return nil, "No HumanoidRootPart"
+	end
+	return humanoidRootPart, nil
+end
+
+local function getSpawnPointsForCurrentMap(): { CFrame }
+	local mapData = MapRegistry.Maps[currentMapId]
+	if mapData and mapData.spawnPoints and #mapData.spawnPoints > 0 then
+		return mapData.spawnPoints
+	end
+	-- Safe fallback spawn if map metadata is missing.
+	return { CFrame.new(0, 5, 0) }
+end
 
 -- Returns 1 if player is in round, 0 otherwise (used by LobbyService for spawn placement)
 function SpawnService:IsPlayerInRound(player: Player): number
@@ -56,67 +81,49 @@ end
 
 -- Teleport to random spawn point on current map. Only when round is InProgress.
 function SpawnService:RequestSpawn(player: Player): (boolean, string?)
-    local state = RoundService:GetRoundState()
-    if state ~= "InProgress" then
-        return false, "Round not in progress"
-    end
-    if playerInRound[player.UserId] then 
-        return false, "Already Spawn"
-    end
-    local character = player.Character 
-    if not character then 
-        return false, "No Character"
-    end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then 
-        return false, "No HumanoidRootPart"
-    end
+	local roundState = RoundService:GetRoundState()
+	if roundState ~= "InProgress" then
+		return false, "Round not in progress"
+	end
+	if playerInRound[player.UserId] then
+		return false, "Already spawned"
+	end
 
-    local mapData = MapRegistry.Maps[currentMapId]
-    local spawnPoints = mapData and mapData.spawnPoints or { CFrame.new(0, 5, 0) }
-    local spawnCf = spawnPoints[math.random(1, #spawnPoints)]
+	local humanoidRootPart, err = getHumanoidRootPart(player)
+	if not humanoidRootPart then
+		return false, err
+	end
 
-    hrp.CFrame = spawnCf 
-    playerInRound[player.UserId] = true 
-    return true, nil
+	local spawnPoints = getSpawnPointsForCurrentMap()
+	local spawnCFrame = spawnPoints[math.random(1, #spawnPoints)]
+	humanoidRootPart.CFrame = spawnCFrame
+	playerInRound[player.UserId] = true
+	return true, nil
 end
 
 -- Teleport to first spawn point (used after map vote / deploy to round)
 function SpawnService:DeployToGame(player: Player): (boolean, string?)
-    local character = player.Character
-    if not character then
-        return false, "No character"
-    end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        return false, "No HumanoidRootPart"
-    end
+	local humanoidRootPart, err = getHumanoidRootPart(player)
+	if not humanoidRootPart then
+		return false, err
+	end
 
-    local mapData = MapRegistry.Maps[currentMapId]
-    local spawnPoints = mapData and mapData.spawnPoints or { CFrame.new(0, 5, 0) }
-    local spawnCf = spawnPoints[1]
-
-    hrp.CFrame = spawnCf
-    playerInRound[player.UserId] = true
-
-    return true, nil
+	local spawnPoints = getSpawnPointsForCurrentMap()
+	humanoidRootPart.CFrame = spawnPoints[1]
+	playerInRound[player.UserId] = true
+	return true, nil
 end
 
 -- Teleport to lobby spawn and remove from round
 function SpawnService:ReturnToLobby(player: Player): (boolean, string?)
-    local character = player.Character
-    if not character then
-        return false, "No character"
-    end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        return false, "No HumanoidRootPart"
-    end
+	local humanoidRootPart, err = getHumanoidRootPart(player)
+	if not humanoidRootPart then
+		return false, err
+	end
 
-    hrp.CFrame = LOBBY_SPAWN_CFRAME
-    playerInRound[player.UserId] = nil
-
-    return true, nil
+	humanoidRootPart.CFrame = LOBBY_SPAWN_CFRAME
+	playerInRound[player.UserId] = nil
+	return true, nil
 end
 
 function SpawnService.Client:RequestSpawn(player: Player)
@@ -137,12 +144,10 @@ end
 
 -- KnitStart: resolve MapService, RoundService; clean up on PlayerRemoving
 function SpawnService:KnitStart()
-    _MapService = Knit.GetService("MapService")
-    RoundService = Knit.GetService("RoundService")
-
-    Players.PlayerRemoving:Connect(function(player)
-        self:CleanPlayerFromRound(player)
-    end)
+	RoundService = Knit.GetService("RoundService")
+	Players.PlayerRemoving:Connect(function(player)
+		self:CleanPlayerFromRound(player)
+	end)
 end
 
 return SpawnService

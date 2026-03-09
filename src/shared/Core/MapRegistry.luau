@@ -1,3 +1,9 @@
+--[[
+	MapRegistry
+	Purpose:
+	Central source of truth for map metadata used by voting and spawn systems.
+]]
+
 local MapTypes = require(script.Parent.util.Types.MapTypes)
 
 type MapInfo = MapTypes.MapInfo 
@@ -27,11 +33,11 @@ local Maps: { [string]: MapInfo } = {
 }
 
 local function getMaps(): { MapInfo }
-    local list = {}
-    for _, map in Maps do 
-        table.insert(list, map)
-    end
-    return list
+	local mapList = {}
+	for _, map in Maps do
+		table.insert(mapList, map)
+	end
+	return mapList
 end
 
 return {

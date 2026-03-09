@@ -1,3 +1,14 @@
+--[[
+	MapService
+	Purpose:
+	Manage map voting state and resolve the winning map identifier.
+
+	Responsibilities:
+	- Expose available maps to clients.
+	- Record per-player vote while voting is open.
+	- Resolve winning map id from vote counts.
+]]
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
@@ -16,9 +27,16 @@ function MapService.Client:GetMaps(_players: Player)
 end
 
 function MapService.Client:VoteMap(player: Player, mapId: string)
-	if isVoting then
-		votes[player.UserId] = mapId
+	if not isVoting then
+		return
 	end
+	if type(mapId) ~= "string" or mapId == "" then
+		return
+	end
+	if not MapRegistry.Maps[mapId] then
+		return
+	end
+	votes[player.UserId] = mapId
 end
 
 function MapService:StartVoting()
@@ -31,23 +49,26 @@ function MapService:EndVoting()
 end
 
 function MapService:GetWinningMap(): string
-	local count: { [string]: number } = {}
+	local voteCounts: { [string]: number } = {}
 	for _, mapId in pairs(votes) do
-		count[mapId] = (count[mapId] or 0) + 1
+		voteCounts[mapId] = (voteCounts[mapId] or 0) + 1
 	end
-	local bestId = ""
-	local bestCount = 0
-	for mapId, c in pairs(count) do
-		if c > bestCount then
-			bestCount = c
-			bestId = mapId
+
+	local winningMapId = ""
+	local winningVoteCount = 0
+	for mapId, voteCount in pairs(voteCounts) do
+		if voteCount > winningVoteCount then
+			winningVoteCount = voteCount
+			winningMapId = mapId
 		end
 	end
-	if bestId == "" then
+
+	if winningMapId == "" then
 		local maps = MapRegistry.getMaps()
 		return (maps[1] and maps[1].id) or "DevMap"
 	end
-	return bestId
+
+	return winningMapId
 end
 
 return MapService

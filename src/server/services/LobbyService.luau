@@ -1,3 +1,14 @@
+--[[
+	LobbyService
+	Purpose:
+	Enforce lobby placement for players outside the active round.
+
+	Behavior:
+	- Players flagged as in-round spawn on the active map.
+	- Players not in-round are forced back to lobby spawn.
+	- A short heartbeat guard prevents players from drifting out of lobby.
+]]
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -16,27 +27,40 @@ local LobbyService = Knit.CreateService({
 local SpawnService
 
 -- Move character to lobby spawn (LOBBY_SPAWN_CFRAME)
-local function teleportToLobby(character)
-    local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 2)
-    if hrp then
-        hrp.CFrame = LOBBY_SPAWN_CFRAME
-    end
+local function getHumanoidRootPart(character: Model): BasePart?
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 2)
+	if humanoidRootPart and humanoidRootPart:IsA("BasePart") then
+		return humanoidRootPart
+	end
+	return nil
+end
+
+local function teleportToLobby(character: Model)
+	local humanoidRootPart = getHumanoidRootPart(character)
+	if not humanoidRootPart then
+		return
+	end
+	humanoidRootPart.CFrame = LOBBY_SPAWN_CFRAME
 end
 
 -- Move character to a random spawn point for the current map (from MapRegistry)
-local function teleportToMap(character, _player)
-    local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 2)
-    if not hrp then return end
-    local mapId = SpawnService:GetCurrentMap()
-    local mapData = MapRegistry.Maps[mapId]
-    local spawnPoints = mapData and mapData.spawnPoints or { CFrame.new(0, 5, 0) }
-    local spawnCf = spawnPoints[math.random(1, #spawnPoints)]
-    hrp.CFrame = spawnCf
+local function teleportToMap(character: Model)
+	local humanoidRootPart = getHumanoidRootPart(character)
+	if not humanoidRootPart then
+		return
+	end
+
+	local mapId = SpawnService:GetCurrentMap()
+	local mapData = MapRegistry.Maps[mapId]
+	local spawnPoints = (mapData and mapData.spawnPoints and #mapData.spawnPoints > 0) and mapData.spawnPoints
+		or { CFrame.new(0, 5, 0) }
+	local spawnCFrame = spawnPoints[math.random(1, #spawnPoints)]
+	humanoidRootPart.CFrame = spawnCFrame
 end
 
 -- True if position is within LOBBY_RADIUS of lobby spawn
 local function isInLobby(pos: Vector3): boolean
-    return (pos - LOBBY_SPAWN_CFRAME.Position).Magnitude < LOBBY_RADIUS
+	return (pos - LOBBY_SPAWN_CFRAME.Position).Magnitude < LOBBY_RADIUS
 end
 
 function LobbyService:KnitInit()
@@ -44,54 +68,64 @@ end
 
 -- KnitStart: wire CharacterAdded and Heartbeat; teleport to lobby or map based on round state
 function LobbyService:KnitStart()
-    SpawnService = Knit.GetService("SpawnService")
+	SpawnService = Knit.GetService("SpawnService")
 
-    local function isInRound(p)
-        return (SpawnService:IsPlayerInRound(p) or 0) == 1
-    end
+	local function isPlayerInRound(player: Player): boolean
+		return (SpawnService:IsPlayerInRound(player) or 0) == 1
+	end
 
-    -- In round → map spawn; not in round → lobby
-    local function handleCharacterSpawn(player: Player, character: Model)
-        if isInRound(player) then
-            teleportToMap(character, player)
-        else
-            teleportToLobby(character)
-        end
-    end
+	local function placeCharacter(player: Player, character: Model)
+		if isPlayerInRound(player) then
+			teleportToMap(character)
+			return
+		end
+		teleportToLobby(character)
+	end
 
-    Players.PlayerAdded:Connect(function(player)
-        player.CharacterAdded:Connect(function(character)
-            handleCharacterSpawn(player, character)
-            -- Heartbeat: if not in round and outside lobby, pull back to lobby
-            local checkCount = 0
-            local conn
-            conn = RunService.Heartbeat:Connect(function()
-                if not character.Parent then
-                    conn:Disconnect()
-                    return
-                end
-                checkCount += 1
-                if checkCount > 30 then
-                    conn:Disconnect()
-                    return
-                end
-                local hrp = character:FindFirstChild("HumanoidRootPart")
-                if hrp and not isInRound(player) and not isInLobby(hrp.Position) then
-                    teleportToLobby(character)
-                end
-            end)
-        end)
-        if player.Character then
-            handleCharacterSpawn(player, player.Character)
-        end
-    end)
+	local function attachLobbyGuard(player: Player, character: Model)
+		local checks = 0
+		local connection: RBXScriptConnection?
+		connection = RunService.Heartbeat:Connect(function()
+			if not character.Parent then
+				connection:Disconnect()
+				return
+			end
 
-    -- Handle players already in game (e.g. on server restart)
-    for _, player in Players:GetPlayers() do
-        if player.Character then
-            handleCharacterSpawn(player, player.Character)
-        end
-    end
+			checks += 1
+			if checks > 30 then
+				connection:Disconnect()
+				return
+			end
+
+			local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+			if not humanoidRootPart then
+				return
+			end
+			if isPlayerInRound(player) then
+				return
+			end
+			if isInLobby(humanoidRootPart.Position) then
+				return
+			end
+
+			teleportToLobby(character)
+		end)
+	end
+
+	local function bindPlayer(player: Player)
+		player.CharacterAdded:Connect(function(character)
+			placeCharacter(player, character)
+			attachLobbyGuard(player, character)
+		end)
+		if player.Character then
+			placeCharacter(player, player.Character)
+		end
+	end
+
+	Players.PlayerAdded:Connect(bindPlayer)
+	for _, player in Players:GetPlayers() do
+		bindPlayer(player)
+	end
 end
 
 return LobbyService

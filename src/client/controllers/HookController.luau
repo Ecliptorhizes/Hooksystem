@@ -1,3 +1,15 @@
+--[[
+	HookController
+	Purpose:
+	Translate local player input into HookService requests and maintain hook-related HUD feedback.
+
+	Input flow:
+	- Q / E: fire or release left/right hooks
+	- A / D: swing input
+	- S: reel out / braking input
+	- Space: boost while hooked
+]]
+
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -23,19 +35,22 @@ local lastSwingForce: number? = nil
 local lastBoostTime = 0
 local BOOST_DEBOUNCE = 0.12
 
+local function isRagdollState(state: Enum.HumanoidStateType): boolean
+	return state == Enum.HumanoidStateType.Ragdoll
+		or state == Enum.HumanoidStateType.FallingDown
+		or state == Enum.HumanoidStateType.Physics
+end
+
 local function getArmOrigin(character: Model, hrp: BasePart, isLeft: boolean): Vector3
-    local names = isLeft and { "Left Arm" } or { "Right Arm" }
-    for _, name in names do
-        local part = character:FindFirstChild(name)
-        if part and part:IsA("BasePart") then
-            local look = hrp.CFrame.LookVector
-            local right = hrp.CFrame.RightVector
-            local forward = look * (HookConfig.HookArmForwardOffset or 1.2)
-            local side = right * ((HookConfig.HookArmSideOffset or 0.4) * (isLeft and -1 or 1))
-            return part.Position + forward + side
-        end
-    end
-    return hrp.Position
+	local armPart = character:FindFirstChild(isLeft and "Left Arm" or "Right Arm")
+	if not armPart or not armPart:IsA("BasePart") then
+		return hrp.Position
+	end
+	local look = hrp.CFrame.LookVector
+	local right = hrp.CFrame.RightVector
+	local forward = look * (HookConfig.HookArmForwardOffset or 1.2)
+	local side = right * ((HookConfig.HookArmSideOffset or 0.4) * (isLeft and -1 or 1))
+	return armPart.Position + forward + side
 end
 
 function HookController:KnitInit()
@@ -59,18 +74,16 @@ function HookController:TryHook(isLeft: boolean)
     local rayResult = Workspace:Raycast(mouseRay.Origin, mouseRay.Direction.Unit * HookConfig.MaxRange, params)
 
     local armOrigin = getArmOrigin(character, hrp, isLeft)
-    local direction: Vector3
-    if rayResult then
-        local targetPoint = rayResult.Position
-        direction = (targetPoint - armOrigin).Unit
-    else
-        direction = mouseRay.Direction.Unit
-    end
+	local direction: Vector3 = rayResult and (rayResult.Position - armOrigin).Unit or mouseRay.Direction.Unit
 
     if HookConfig.UseProjectilePhase then
         local success, err = self.HookService:RequestFireHook(armOrigin, direction, isLeft):await()
         if success then
-            if isLeft then hookLeft = true else hookRight = true end
+			if isLeft then
+				hookLeft = true
+			else
+				hookRight = true
+			end
             reelForce = 0
         elseif err then
             warn("[HookController] Hook failed:", err)
@@ -84,7 +97,11 @@ function HookController:TryHook(isLeft: boolean)
 
     local success, err = self.HookService:RequestHook(rayResult.Instance, rayResult.Position, isLeft):await()
     if success then
-        if isLeft then hookLeft = true else hookRight = true end
+		if isLeft then
+			hookLeft = true
+		else
+			hookRight = true
+		end
         reelForce = 0
     elseif err then
         warn("[HookController] Hook failed:", err)
@@ -234,11 +251,8 @@ function HookController:KnitStart()
         if not isHooked then return end
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if humanoid then
-            local st = humanoid:GetState()
-            if st == Enum.HumanoidStateType.Ragdoll
-                or st == Enum.HumanoidStateType.FallingDown
-                or st == Enum.HumanoidStateType.Physics
-            then
+            local currentState = humanoid:GetState()
+            if isRagdollState(currentState) then
                 humanoid:ChangeState(Enum.HumanoidStateType.PlatformStanding)
             end
         end

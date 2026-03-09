@@ -1,3 +1,9 @@
+--[[
+	DevTuningExample
+	Purpose:
+	Provide Studio-only sample probes and sliders that demonstrate DevTuning APIs.
+]]
+
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 

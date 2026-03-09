@@ -1,3 +1,10 @@
+--[[
+	SpeedVFXController
+	Purpose:
+	Render first-person airborne speed-line VFX when player velocity exceeds threshold.
+	Includes hysteresis to avoid visual flicker around activation speed.
+]]
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,6 +21,13 @@ local SpeedVFXController = Knit.CreateController({
 local maid = Maid.new()
 local speedLinesClone: Instance? = nil
 local template: Model? = nil
+
+local function destroySpeedLines()
+	if speedLinesClone then
+		speedLinesClone:Destroy()
+		speedLinesClone = nil
+	end
+end
 
 local function getTemplate(): Model?
 	if template and template.Parent then
@@ -128,29 +142,20 @@ function SpeedVFXController:KnitStart()
 	local player = Players.LocalPlayer
 
 	maid:GiveTask(player.CharacterRemoving:Connect(function()
-		if speedLinesClone then
-			speedLinesClone:Destroy()
-			speedLinesClone = nil
-		end
+		destroySpeedLines()
 	end))
 
 	maid:GiveTask(RunService.RenderStepped:Connect(function()
 		local character = player.Character
 		if not character then
-			if speedLinesClone then
-				speedLinesClone:Destroy()
-				speedLinesClone = nil
-			end
+			destroySpeedLines()
 			return
 		end
 
 		local hrp = character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
 		if not hrp or not hrp:IsA("BasePart") or not humanoid then
-			if speedLinesClone then
-				speedLinesClone:Destroy()
-				speedLinesClone = nil
-			end
+			destroySpeedLines()
 			return
 		end
 
@@ -163,18 +168,15 @@ function SpeedVFXController:KnitStart()
 		local show = shouldShowSpeedVFX(velocity, camera, hrp, humanoid)
 
 		if not show then
-			if speedLinesClone then
-				speedLinesClone:Destroy()
-				speedLinesClone = nil
-			end
+			destroySpeedLines()
 			return
 		end
 
 		if not speedLinesClone or not speedLinesClone.Parent then
-			local t = getTemplate()
-			local clone: Instance = if t then t:Clone() else createFallbackSpeedLines()
+			local templateModel = getTemplate()
+			local clone: Instance = if templateModel then templateModel:Clone() else createFallbackSpeedLines()
 			clone.Name = "SpeedLinesClone"
-			clone.Parent = workspace
+			clone.Parent = Workspace
 			speedLinesClone = clone
 		end
 
@@ -201,10 +203,7 @@ function SpeedVFXController:KnitStart()
 end
 
 function SpeedVFXController:KnitDestroy()
-	if speedLinesClone then
-		speedLinesClone:Destroy()
-		speedLinesClone = nil
-	end
+	destroySpeedLines()
 	maid:DoCleaning()
 end
 
